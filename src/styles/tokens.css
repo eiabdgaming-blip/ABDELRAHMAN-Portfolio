@@ -1,0 +1,87 @@
+/* Values from handoff/design/DESIGN_TOKENS.json. Motion targets are starting values. */
+:root {
+  --color-background: #08090B;
+  --color-charcoal: #141519;
+  --color-text: #F4F3F8;
+  --color-silver: #B9C3D2;
+  --color-amethyst: #9254FF;
+  --color-lavender: #B994FF;
+  --color-muted: #AAB0BD;
+  --color-divider: #3D424D;
+  --color-services-surface: #F2F0F5;
+  --color-services-ink: #13121A;
+  --color-contact-gradient-start: #362251;
+  --color-contact-gradient-middle: #221532;
+  --color-contact-gradient-end: #191226;
+  --color-whatsapp: #234E41;
+  --color-error: #FFADB8;
+  --color-focus: #D5BAFF;
+
+  --font-display: 'Archivo Black', system-ui, sans-serif;
+  --font-body: Geist, system-ui, sans-serif;
+  --font-technical: 'Geist Mono', ui-monospace, monospace;
+  --hero-max-desktop: 152px;
+  --hero-max-mobile: 42px;
+  --hero-max-compact: 33px;
+  --reels-display-desktop: 92px;
+  --reels-display-mobile: 54px;
+  --timeline-display-desktop: 91px;
+  --timeline-display-mobile: 36px;
+  --services-display-desktop: 102px;
+  --services-display-mobile: 48px;
+  --faq-display-desktop: 92px;
+  --faq-display-mobile: 52px;
+  --primary-copy-size-desktop: 20px;
+  --primary-copy-line-desktop: 29px;
+  --primary-copy-size-mobile: 16px;
+  --primary-copy-line-mobile: 23px;
+  --player-timecode-desktop: 14px;
+  --player-timecode-mobile: 12px;
+  --display-line-height-min: 0.94;
+  --display-line-height-max: 1;
+  --nav-brand-desktop: 14px;
+  --nav-brand-mobile: 12px;
+
+  --gutter-desktop: 72px;
+  --gutter-mobile: 20px;
+  --services-inset-desktop: 115px;
+  --contact-inset-mobile: 18px;
+  --reel-gap-desktop: 24px;
+  --reel-side-width-desktop: 270px;
+  --reel-active-width-desktop: 300px;
+  --reel-width-mobile: 232px;
+  --reel-width-compact: 216px;
+  --reel-aspect: 9 / 16;
+  --long-form-aspect: 16 / 9;
+  --showreel-aspect: 16 / 9;
+  --mobile-target-min: 44px;
+  /* CSS radius clamping makes this half the height on a horizontal pill. */
+  --pill-radius: 9999px;
+  --media-radius-desktop: 21px;
+  --media-radius-mobile: 15px;
+
+  --nav-settle-min: 180ms;
+  --nav-settle-max: 260ms;
+  --nav-settle-longest: 320ms;
+  --nav-scale-axis-max: 1.08;
+  --nav-rim-min: 7px;
+  --nav-rim-max: 10px;
+  --nav-idle-displacement-min: 7px;
+  --nav-idle-displacement-max: 11px;
+  --nav-motion-dpr-cap: 1.25;
+  --video-optics-max-fps: 30;
+  --reel-settle-min: 210ms;
+  --reel-settle-max: 240ms;
+  --brand-smear-min-desktop: 7px;
+  --brand-smear-max-desktop: 12px;
+  --brand-smear-min-mobile: 5px;
+  --brand-smear-max-mobile: 8px;
+
+  --gutter: var(--gutter-desktop);
+}
+
+@media (max-width: 767px) {
+  :root {
+    --gutter: var(--gutter-mobile);
+  }
+}
