@@ -13,11 +13,14 @@
     "build": "next build",
     "test": "node --test tests/foundation.test.ts",
     "test:smoke": "node --test tests/routing.test.mjs",
+    "test:auth": "node --test tests/admin-auth.test.mjs",
     "test:browser": "node --test tests/browser.test.mjs",
     "test:engines": "node --test tests/engines.test.mjs",
     "capture": "node tests/capture.mjs"
   },
   "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.119.0",
     "next": "16.4.6",
     "react": "19.3.1",
     "react-dom": "19.3.1"

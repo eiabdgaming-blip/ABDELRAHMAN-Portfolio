@@ -33,7 +33,7 @@ test('built site serves Home and Work and withholds local review data by default
   }
 
   for (const path of [
-    '/work/local-test-only', '/privacy', '/admin', '/admin/projects', '/api/admin/preview',
+    '/work/local-test-only', '/privacy', '/admin/projects', '/api/admin/preview',
     '/references/approved/ABDELRAHMAN-Home-1440.png', '/assets/media/DIGITAL%20MARKETING1.mp4', '/api/review/showreel',
   ]) {
     const response = await request(path)

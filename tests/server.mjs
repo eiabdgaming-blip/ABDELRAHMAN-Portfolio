@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url'
 export const root = new URL('../', import.meta.url)
 const next = fileURLToPath(new URL('node_modules/next/dist/bin/next', root))
 
-export async function startBuiltServer({ review = false } = {}) {
+export async function startBuiltServer({ review = false, env = {} } = {}) {
   await readFile(new URL('.next/BUILD_ID', root))
   const server = spawn(process.execPath, [next, 'start', '--hostname', '127.0.0.1', '--port', '0'], {
     cwd: root,
-    env: { ...process.env, ABDEL_LOCAL_REVIEW: review ? '1' : '0', NEXT_TELEMETRY_DISABLED: '1', NO_COLOR: '1' },
+    env: { ...process.env, ABDEL_LOCAL_REVIEW: review ? '1' : '0', NEXT_TELEMETRY_DISABLED: '1', NO_COLOR: '1', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const closed = once(server, 'close')
