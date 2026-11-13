@@ -57,7 +57,7 @@ export function portfolioRepository(review: boolean): PortfolioRepository {
     async getHome(): Promise<HomeContent> {
       return {
         releaseId, featuredReels: review ? projects : [], reviews: [],
-        showreel: review ? { id: 'showreel', kind: 'video', width: 1920, height: 1080, durationMs: 6600 } : undefined,
+        showreel: { id: 'showreel', kind: 'video', width: 1920, height: 1080, durationMs: 6600 },
       }
     },
     async listWork({ format, tagSlugs, sort, cursor, limit = 12 }: WorkQuery) {

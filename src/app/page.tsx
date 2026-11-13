@@ -16,7 +16,17 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     <>
       <Navigation initial="home" />
       <main id="main">
-        <Hero showreel={showreel && playerItem('Showreel', 'showreel-poster', showreel)} />
+        <Hero
+  showreel={
+    showreel
+      ? {
+          ...playerItem('Showreel', 'showreel-poster', showreel),
+          src: '/videos/showreel.mp4',
+          poster: '/videos/showreel-poster.png',
+        }
+      : undefined
+  }
+/>
         <section id="reels" className="home-reels container" tabIndex={-1} aria-labelledby="reels-heading" data-empty={!featured.length}>
           <div className="section-intro">
             <span className="eyebrow">Selected work</span>
