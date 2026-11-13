@@ -4,6 +4,7 @@
   padding: 12vh 0 48px;
 }
 
+.shell:has([data-media-library]) { width: min(100% - 40px, 1024px); }
 .shell p { margin-block: 16px; overflow-wrap: anywhere; }
 .form { display: grid; gap: 16px; }
 .form label { display: grid; gap: 6px; }
