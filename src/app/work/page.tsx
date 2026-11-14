@@ -1,4 +1,3 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Navigation } from '../../components/navigation'
 import { ReelRail } from '../../components/reel-rail'
@@ -11,8 +10,11 @@ import { workCategories } from '../../domain/work-categories'
 import { portfolioWork } from '../../server/portfolio-cms'
 import { publicPlayerItem } from '../../domain/portfolio-cms'
 import { PortfolioCard } from '../../components/portfolio-projects'
+import { publicMetadata } from '../../server/site-metadata'
 
-export const metadata: Metadata = { title: 'Work' }
+export function generateMetadata() {
+  return publicMetadata('/work', 'Work', 'Browse Abdelrahman’s video editing and motion design portfolio, from Reels and Shorts to long-form video and project case studies.')
+}
 
 type Query = Record<string, string | string[] | undefined>
 
@@ -45,7 +47,7 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
   return (
     <>
       <Navigation initial="work" />
-      <main id="main" className="work-page container">
+      <main id="main" className="work-page container" tabIndex={-1}>
         <h1 className="metallic-heading" tabIndex={-1}>WORK</h1>
         <p className="section-copy">Browse by format and project type.</p>
         <nav className="work-formats" aria-label="Work format">

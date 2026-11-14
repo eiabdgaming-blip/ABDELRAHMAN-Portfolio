@@ -28,6 +28,7 @@ export function Navigation({ initial }: { initial: Destination }) {
   const lens = useRef<HTMLSpanElement>(null)
   const plate = useRef<HTMLCanvasElement>(null)
   const optics = useRef<HTMLCanvasElement>(null)
+  const plateCache = useRef<{ width: number; height: number; dpr: number; bitmap: ImageData | undefined }>(undefined)
   const target = focus ?? hover ?? active
 
   useEffect(() => {
@@ -87,6 +88,17 @@ export function Navigation({ initial }: { initial: Destination }) {
     let bitmap: ImageData | undefined
     let dpr = 1
     const motion = matchMedia('(prefers-reduced-motion: reduce)')
+    const preparePlate = (bounds: DOMRect) => {
+      const { width, height } = bounds
+      dpr = Math.min(1.25, devicePixelRatio)
+      const previous = plateCache.current
+      if (previous && previous.width === width && previous.height === height && previous.dpr === dpr) {
+        bitmap = previous.bitmap
+        return
+      }
+      bitmap = paintNavPlate(backing, width, height, dpr)
+      plateCache.current = { width, height, dpr, bitmap }
+    }
     const update = () => {
       const bounds = nav.getBoundingClientRect()
       if (!bounds.width || !bounds.height) return
@@ -113,8 +125,7 @@ export function Navigation({ initial }: { initial: Destination }) {
       const next = layoutSignature()
       if (next === layout) return
       layout = next
-      dpr = Math.min(1.25, devicePixelRatio)
-      bitmap = paintNavPlate(backing, bounds.width, bounds.height, dpr)
+      preparePlate(bounds)
       nav.dataset.snap = 'true'
       update()
       cancelAnimationFrame(snap)
@@ -135,8 +146,7 @@ export function Navigation({ initial }: { initial: Destination }) {
     const bounds = nav.getBoundingClientRect()
     if (bounds.width && bounds.height) {
       layout = layoutSignature()
-      dpr = Math.min(1.25, devicePixelRatio)
-      bitmap = paintNavPlate(backing, bounds.width, bounds.height, dpr)
+      preparePlate(bounds)
       update()
       frame = requestAnimationFrame(tick)
     }

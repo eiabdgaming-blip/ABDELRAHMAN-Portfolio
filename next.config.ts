@@ -11,6 +11,14 @@ const config: NextConfig = {
         headers: [{ key: 'X-Content-Type-Options', value: 'nosniff' }],
       },
       {
+        source: '/fonts/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=86400' }],
+      },
+      {
+        source: '/api/:path*',
+        headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
+      },
+      {
         source: '/admin/:path*',
         headers: [
           { key: 'Content-Security-Policy', value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" },

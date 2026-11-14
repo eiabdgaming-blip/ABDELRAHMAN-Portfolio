@@ -5,6 +5,9 @@ import type { PlayerItem } from '../domain/display'
 import { PlayIcon } from './icons'
 import { useMediaExperience } from './media-experience'
 
+const compactPoster = '(max-width: 767px) and (max-resolution: 1.5dppx)'
+const reelPoster = compactPoster + ', (min-width: 768px) and (max-resolution: 1dppx)'
+
 export function InlineVideo({ item, slot, inactive = false, onStart, canStart }: {
   item: PlayerItem
   slot?: string
@@ -82,8 +85,8 @@ export function InlineVideo({ item, slot, inactive = false, onStart, canStart }:
     <div className="inline-video reel-cover" ref={frame}
       inert={inactive} aria-hidden={inactive || undefined} data-slot={slot} data-playing={playing} data-has-frame={hasFrame}>
       <picture>
-        {item.smallPoster && <source media="(max-width: 767px) and (max-resolution: 1.5dppx)" srcSet={item.smallPoster} />}
-        <img src={item.poster} alt="" loading="lazy" draggable="false" />
+        {item.smallPoster && <source media={slot ? reelPoster : compactPoster} srcSet={item.smallPoster} />}
+        <img src={item.poster} alt="" loading="lazy" draggable="false" decoding="async" />
       </picture>
       <video ref={video} muted={muted} playsInline preload="none" aria-hidden="true"
         onPlaying={() => { setHasFrame(true); setPlaying(true) }}

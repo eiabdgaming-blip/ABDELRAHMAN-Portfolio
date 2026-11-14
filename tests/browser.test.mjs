@@ -50,7 +50,7 @@ test('responsive Home and Work match the required order, viewport geometry and r
       const page = await pageFor(t, { viewport: { width, height }, reducedMotion: 'reduce' })
       const errors = []
       page.on('pageerror', (error) => errors.push(error.message))
-      await page.goto(url())
+      await page.goto(url(), { waitUntil: 'domcontentloaded' })
       await page.evaluate(() => document.fonts.ready)
       await noOverflow(page)
       assert.deepEqual(await page.locator('main section > h1, main section h2').allTextContents(),
@@ -77,7 +77,7 @@ test('responsive Home and Work match the required order, viewport geometry and r
       })
       assert.equal(headingFits, true)
       assert.equal(await page.locator('.nav-lens').count(), 1)
-      assert.equal(await lens(page).isVisible(), width > 767)
+      await lens(page).waitFor({ state: width > 767 ? 'visible' : 'hidden' })
       assert.equal(await page.locator('.nav-brand .brand-ink').evaluate((element) => getComputedStyle(element).color), 'rgb(244, 243, 248)')
       assert.ok(await page.locator('.nav-brand .brand-ink').evaluate((element) => getComputedStyle(element, '::after').filter.includes('blur')))
       const explore = page.getByRole('link', { name: 'Scroll to explore' })
@@ -220,12 +220,19 @@ test('section links land below the sticky header with smooth scrolling and track
     await page.waitForURL('**/#' + id)
     await arrived(id)
   }
-  await page.evaluate(() => document.getElementById('faq').scrollIntoView({ behavior: 'instant' }))
+  await page.evaluate(async () => {
+    const scrolled = new Promise((resolve) => document.addEventListener('scrollend', resolve, { once: true }))
+    document.getElementById('faq').scrollIntoView({ behavior: 'instant' })
+    await scrolled
+  })
   await page.waitForFunction(() => document.querySelector('[data-destination="faq"]').getAttribute('aria-current') === 'location')
   assert.equal(new URL(page.url()).hash, '#reels')
   await page.goBack()
   await arrived('hero')
+  // Chromium restores the previous entry's position as the smooth scroll settles.
+  await page.waitForFunction(() => scrollY === 0)
   await page.goForward()
+  await page.waitForURL('**/#reels')
   await arrived('faq')
 })
 
@@ -311,12 +318,15 @@ test('public decorations match the originals, review reels support ranges, and a
 test('production Home and Work render without broken images or review requests', async (t) => {
   const production = await startBuiltServer({ env: { NEXT_PUBLIC_SUPABASE_URL: '', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: '' } })
   t.after(production.stop)
-  for (const [width, height] of [[1440, 900], [390, 844]]) {
+  for (const [width, height] of [[1440, 900], [1024, 768], [768, 900], [390, 844]]) {
     const page = await pageFor(t, { viewport: { width, height }, reducedMotion: 'reduce' })
     const reviewRequests = []
     page.on('request', (request) => { if (new URL(request.url()).pathname.startsWith('/api/review/')) reviewRequests.push(request.url()) })
     await page.goto(production.origin)
-    for (const section of ['#hero', '#reels', '#feedback', '#contact']) await page.locator(section).waitFor()
+    for (const section of ['#hero', '#reels', '.timeline-section', '#services', '#feedback', '#faq', '#contact']) {
+      await page.locator(section).scrollIntoViewIfNeeded()
+      await noOverflow(page)
+    }
     const visuals = page.locator('img[src^="/visuals/"]')
     assert.equal(await visuals.count(), 8)
     for (const image of await visuals.all()) {
@@ -326,12 +336,22 @@ test('production Home and Work render without broken images or review requests',
         return node.naturalWidth > 0
       }))
     }
+    await page.locator('.hero-poster').scrollIntoViewIfNeeded()
     await page.waitForFunction(() => document.querySelector('.hero-poster video')?.currentTime > 0.15)
     assert.equal(await page.locator('[data-ambient] video').count(), 0)
     await noOverflow(page)
     await page.goto(production.origin + '/work')
     await page.getByRole('heading', { name: 'WORK', exact: true }).waitFor()
     await noOverflow(page)
+    await page.keyboard.press('Tab')
+    assert.equal(await page.evaluate(() => document.activeElement?.className), 'skip-link')
+    await page.keyboard.press('Enter')
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'main')
+    await page.goto(production.origin + '/admin/login')
+    await noOverflow(page)
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Enter')
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'main')
     assert.deepEqual(reviewRequests, [])
     await page.close()
   }

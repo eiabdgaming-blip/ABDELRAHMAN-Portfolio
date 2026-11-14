@@ -456,6 +456,27 @@ test('admin auth, media and site content against local provider stubs', async (t
   await page.reload()
   await dashboard.waitFor()
 
+  await t.test('Admin dashboard stays within the viewport and exposes its keyboard skip target', async () => {
+    const original = page.viewportSize()
+    try {
+      for (const width of [390, 768, 1024, 1440]) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.reload()
+        await dashboard.waitFor()
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}px`)
+        await page.keyboard.press('Tab')
+        assert.equal(await page.evaluate(() => document.activeElement?.className), 'skip-link')
+        await page.keyboard.press('Enter')
+        assert.equal(await page.evaluate(() => document.activeElement?.id), 'main')
+        await page.keyboard.press('Tab')
+        assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Media Library')
+      }
+    } finally {
+      await page.setViewportSize(original)
+      await page.goto(admin)
+    }
+  })
+
   await t.test('validates input, verifies provider metadata and retries the draft insert without re-uploading', async () => {
     await page.getByRole('link', { name: 'Media Library' }).click()
     await page.waitForURL(media)
@@ -609,6 +630,9 @@ test('admin auth, media and site content against local provider stubs', async (t
       await homeReels.waitFor()
       const reel = homeReels.locator('video')
       assert.equal(await reel.getAttribute('src'), null)
+      const poster = homeReels.locator('picture img')
+      await poster.scrollIntoViewIfNeeded()
+      await publicPage.waitForFunction(() => document.querySelector('#reels picture img')?.currentSrc.includes('w_360'))
       await play.click()
       await homeReels.getByRole('button', { name: 'Pause Published test Reel' }).waitFor()
       await reel.evaluate((node) => { node.muted = true })
@@ -918,6 +942,11 @@ test('admin auth, media and site content against local provider stubs', async (t
       await home.getByRole('region', { name: 'SELECTED WORK' }).getByRole('link', { name: 'Open Test case study' }).click()
       await home.getByRole('heading', { name: 'Project overview' }).waitFor()
       assert.equal(await home.locator('.portfolio-gallery > div').first().locator('video').count(), 0)
+      for (const width of [390, 768, 1024, 1440]) {
+        await home.setViewportSize({ width, height: 900 })
+        assert.ok(await home.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Case study at ${width}px`)
+        assert.equal(await home.locator('.portfolio-gallery video[src]').count(), 0)
+      }
       await home.goto(server.origin + '/work?format=long-form')
       assert.equal(await home.getByRole('link', { name: 'Open Test case study' }).count(), 1)
       assert.equal(await home.getByRole('button', { name: 'Open Published test Reel' }).count(), 0)

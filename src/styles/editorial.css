@@ -254,6 +254,7 @@
 .portfolio-selected { margin-block: 32px; }
 .portfolio-selected .long-form-grid { margin-top: 20px; }
 .portfolio-action { margin-top: 10px; }
+.portfolio-study { overflow-wrap: anywhere; }
 .portfolio-study > section { margin-block: 28px; max-width: 72ch; }
 .portfolio-study > section p { white-space: pre-line; margin-top: 8px; }
 .portfolio-gallery { display: grid; gap: 16px; margin-block: 16px; justify-items: start; }

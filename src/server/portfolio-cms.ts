@@ -1,5 +1,6 @@
 import 'server-only'
-import type { PublicFeedback, PublicProject, Study } from '../domain/portfolio-cms'
+import { cache } from 'react'
+import { slugPattern, type PublicFeedback, type PublicProject, type Study } from '../domain/portfolio-cms'
 import type { WorkQuery } from '../domain/portfolio'
 import { createPublicSupabaseClient } from '../lib/supabase/public'
 
@@ -31,8 +32,22 @@ export async function portfolioWork({ format, tagSlugs, sort, cursor, limit = 12
   return { projects: rows.slice(0, count), nextCursor: rows.length > count ? String(offset + count) : null }
 }
 
-export async function publicCaseStudy(slug: string) {
+export const publicCaseStudy = cache(async (slug: string) => {
+  if (slug.length > 80 || !slugPattern.test(slug)) return null
   const result = await createPublicSupabaseClient()?.from('portfolio_public_case_studies')
     .select(projectFields + ',overview,requirements,role,approach,process,outcome').eq('slug', slug).maybeSingle()
   return (result?.data ?? null) as (PublicProject & Study) | null
+})
+
+export async function publishedCaseStudySlugs() {
+  const supabase = createPublicSupabaseClient()
+  if (!supabase) return []
+  const slugs: string[] = []
+  const size = 500
+  for (let start = 0; ; start += size) {
+    const { data, error } = await supabase.from('portfolio_public_case_studies').select('slug').order('slug').range(start, start + size - 1)
+    if (error || !data) return slugs
+    for (const { slug } of data) if (typeof slug === 'string' && slug.length <= 80 && slugPattern.test(slug)) slugs.push(slug)
+    if (data.length < size) return slugs
+  }
 }

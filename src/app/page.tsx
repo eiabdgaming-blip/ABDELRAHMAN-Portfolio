@@ -9,6 +9,12 @@ import { publishedHomeReels } from '../server/published-media'
 import { publicSiteContent } from '../server/site-content'
 import { homePortfolioContent } from '../server/portfolio-cms'
 import { SelectedProjects } from '../components/portfolio-projects'
+import { publicMetadata } from '../server/site-metadata'
+
+export function generateMetadata() {
+  return publicMetadata('/', 'ABDELRAHMAN | Video Editor & Motion Designer',
+    'Explore Abdelrahman’s showreel, video editing and motion design work, and services for short-form and long-form projects.')
+}
 
 export default async function HomePage({ searchParams }: { searchParams: Promise<{ service?: string | string[] }> }) {
   const [review, query] = await Promise.all([localReview(), searchParams])
@@ -23,8 +29,9 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const selectedService = services.find(([key]) => key === query.service)?.[0] ?? ''
   return (
     <>
+      {showreel && <link rel="preload" href="/videos/showreel-poster.png" as="image" fetchPriority="high" />}
       <Navigation initial="home" />
-      <main id="main">
+      <main id="main" tabIndex={-1}>
         <Hero
   showreel={
     showreel

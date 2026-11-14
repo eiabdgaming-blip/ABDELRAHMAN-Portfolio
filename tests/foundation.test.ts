@@ -70,6 +70,11 @@ test('public contains only approved fonts, decorative originals and the tracked 
   )
   assert.equal(approvedFonts.length, 5)
   const publicPaths = approvedFonts.map(({ path }) => `fonts/${posix.basename(path)}`)
+  const webFonts = {
+    'fonts/archivo-black.woff2': 'c1a36cce93e75bb56a9502e384249d8dd6a20189053d1628b12274bcb8437ae1',
+    'fonts/geist.woff2': '2ffebe993e969069a9789d15164b7715d42491b5835516c5e3b935d5f81b05f1',
+    'fonts/geist-mono.woff2': '09853cd11045cf50e8ac07faf08bd5420f181b924f4c65b93b8ee49259a03734',
+  }
   const decorations = {
     'hero-left.mp4': 'assets/media/hero_star_LEFT_as_submitted.mp4',
     'hero-left-poster.png': 'assets/stills/Glass_Star_Angle_D-2.png',
@@ -90,14 +95,14 @@ test('public contains only approved fonts, decorative originals and the tracked 
     'videos/showreel-poster.png': 'd6cb5847ea7284687ccfff0d0bddd2307ccabec10da4b6d552e7911ac4a59ba8',
   }
   assert.deepEqual(relativeFiles(publicRoot), [
-    ...publicPaths, ...Object.keys(decorations).map((name) => 'visuals/' + name), ...Object.keys(showreel),
+    ...publicPaths, ...Object.keys(webFonts), ...Object.keys(decorations).map((name) => 'visuals/' + name), ...Object.keys(showreel),
   ].sort())
   for (const [name, original] of Object.entries(decorations)) {
     const expected = assets.find(({ path }) => path === original)
     assert.ok(expected, original)
     assert.equal(sha256(new URL('visuals/' + name, publicRoot)), expected.sha256, name)
   }
-  for (const [path, hash] of Object.entries(showreel)) {
+  for (const [path, hash] of Object.entries({ ...webFonts, ...showreel })) {
     assert.equal(sha256(new URL(path, publicRoot)), hash, path)
   }
   for (const [index, asset] of approvedFonts.entries()) {

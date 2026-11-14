@@ -26,6 +26,10 @@ The 13 decorative handoff assets in `public/visuals/` have unverified publicatio
 
 Run `npm.cmd run typecheck`, `npm.cmd run build`, `npm.cmd test`, `npm.cmd run test:smoke`, `npm.cmd run test:auth`, `npm.cmd run test:browser`, and `npm.cmd run test:engines` from `app/`. The review browser suite starts a development server. The smoke, auth and engine suites run the production build.
 
+### Search indexing
+
+Public pages stay out of search results by default. Once the decorative asset rights are verified and the production origin is confirmed, set `NEXT_PUBLIC_SITE_URL` to the actual HTTPS origin and `PORTFOLIO_INDEXING_ENABLED=1` in the production environment. Verify `/robots.txt`, `/sitemap.xml`, and the canonical tags on Home, Work and a published case study. Keep indexing disabled for local and preview environments.
+
 | Changed files | Scope |
 |---|---|
 | `src/app/layout.tsx`, `page.tsx`, `work/page.tsx`, `work/error.tsx` | Home and Work, URL-driven catalog controls and shared Player context |

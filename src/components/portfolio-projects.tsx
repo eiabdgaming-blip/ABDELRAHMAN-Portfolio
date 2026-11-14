@@ -2,17 +2,10 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { publicPlayerItem, type PublicAsset, type PublicProject } from '../domain/portfolio-cms'
-import { InlineVideo } from './inline-video'
+import { publicPlayerItem, type PublicProject } from '../domain/portfolio-cms'
+import { ProjectMedia } from './project-media'
 import { useMediaExperience } from './media-experience'
 import { PlayIcon } from './icons'
-
-export function ProjectMedia({ media }: { media: PublicAsset }) {
-  return <div className="portfolio-media" style={{ aspectRatio: `${media.width} / ${media.height}` }}>
-    {media.kind === 'video' ? <InlineVideo item={publicPlayerItem(media)} /> :
-      <img src={media.url} alt={media.title} loading="lazy" width={media.width} height={media.height} />}
-  </div>
-}
 
 export function PortfolioCard({ project }: { project: PublicProject }) {
   const { showVideo } = useMediaExperience()
@@ -24,7 +17,7 @@ export function PortfolioCard({ project }: { project: PublicProject }) {
     publicPlayerItem(video, i === 0 ? project.title : video.title, i === 0 ? project.poster_url : video.poster))
   const cover = <picture>
     {project.poster_small_url && <source media="(max-width: 767px) and (max-resolution: 1.5dppx)" srcSet={project.poster_small_url} />}
-    <img src={project.poster_url} alt="" loading="lazy" />
+    <img src={project.poster_url} alt="" loading="lazy" decoding="async" />
   </picture>
   return <article className="long-form-project">
     {caseStudy ? <Link className="long-form-cover" href={caseStudy} aria-label={`Open ${project.title}`}>{cover}</Link>

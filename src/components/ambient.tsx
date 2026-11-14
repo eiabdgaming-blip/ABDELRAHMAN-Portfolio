@@ -28,7 +28,7 @@ export function AmbientMedia({ id, priority, className, desktopOnly = false }: {
     function sync() {
       const reduced = motion.matches || dataPreference.matches || connection?.saveData || /(^|slow-)2g$/.test(connection?.effectiveType ?? '')
       allow.current(id, (id === 'hero-left' || sectionVisible) && slotVisible && !document.hidden && !reduced && !(desktopOnly && compact.matches)
-        && node.getBoundingClientRect().width > 0 ? priority : null)
+        && getComputedStyle(node).visibility === 'visible' ? priority : null)
     }
     const sections = new IntersectionObserver(([entry]) => {
       sectionVisible = entry.intersectionRatio >= .25
@@ -59,7 +59,8 @@ export function AmbientMedia({ id, priority, className, desktopOnly = false }: {
 
   return (
     <span ref={container} className={`ambient ${className}`} aria-hidden="true" data-ambient={id}>
-      <img src={decorativePath(poster)} alt="" draggable="false" loading={priority < 3 ? 'eager' : 'lazy'} />
+      <img src={decorativePath(poster)} alt="" draggable="false" loading={priority < 3 ? 'eager' : 'lazy'}
+        fetchPriority="low" decoding="async" />
       {playing && <video ref={video} src={decorativePath(clip)} autoPlay muted playsInline loop tabIndex={-1}
         className={ready ? 'is-playing' : undefined} onPlaying={() => setReady(true)} onError={() => setReady(false)} />}
     </span>
