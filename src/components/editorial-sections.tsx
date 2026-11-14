@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { reviewMedia } from '../domain/display'
-import { projectTypes, questions, services } from '../domain/editorial'
+import { projectTypes } from '../domain/editorial'
+import type { Question, Service, SiteContact } from '../domain/site-content'
 import { ownerEmailLink, ownerSocialLinks, whatsappDraft } from '../domain/contact'
 import { AmbientMedia } from './ambient'
 import { PlayIcon } from './icons'
 import { useMediaExperience } from './media-experience'
 
-export function Services() {
+export function Services({ services }: { services: readonly Service[] }) {
   return (
     <section id="services" className="services" tabIndex={-1} aria-labelledby="services-heading">
       <div className="editorial-container">
@@ -16,7 +17,7 @@ export function Services() {
         <ol>
           {services.map(([id, title, copy], i) => (
             <li key={id}>
-              <span className="service-number" aria-hidden="true">0{i + 1}</span>
+              <span className="service-number" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
               <h3>{title}</h3><p>{copy}</p>
               <a className="service-link" aria-label={`Ask about ${title}`} href={`/?service=${id}#contact`}>↗</a>
             </li>
@@ -43,20 +44,20 @@ export function About({ review }: { review: boolean }) {
   )
 }
 
-export function FAQ({ review }: { review: boolean }) {
-  const [open, setOpen] = useState<number | null>(0)
+export function FAQ({ questions }: { questions: readonly Question[] }) {
+  const [open, setOpen] = useState<string | null>(questions[0]?.id ?? null)
   return (
     <section id="faq" className="faq editorial-container" tabIndex={-1} aria-labelledby="faq-heading">
       <h2 className="metallic-heading" id="faq-heading">FAQ</h2>
-      {(review ? questions : questions.slice(0, 1)).map(([question, answer], i) => (
-        <div className="faq-row" key={question}>
+      {questions.map(({ id, question, answer }, i) => (
+        <div className="faq-row" key={id}>
           <h3>
-            <button type="button" id={`faq-q-${i}`} aria-expanded={open === i} aria-controls={`faq-a-${i}`}
-              onClick={() => setOpen(open === i ? null : i)}>
-              {question}<span className="glass" aria-hidden="true">{open === i ? '−' : '+'}</span>
+            <button type="button" id={`faq-q-${i}`} aria-expanded={open === id} aria-controls={`faq-a-${i}`}
+              onClick={() => setOpen(open === id ? null : id)}>
+              {question}<span className="glass" aria-hidden="true">{open === id ? '−' : '+'}</span>
             </button>
           </h3>
-          <p id={`faq-a-${i}`} aria-labelledby={`faq-q-${i}`} hidden={open !== i}>{answer}</p>
+          <p id={`faq-a-${i}`} aria-labelledby={`faq-q-${i}`} hidden={open !== id}>{answer}</p>
         </div>
       ))}
     </section>
@@ -76,7 +77,9 @@ function Illustration({ review }: { review: boolean }) {
   )
 }
 
-export function Contact({ review, selectedService }: { review: boolean; selectedService: string }) {
+export function Contact({ review, selectedService, services, contact }: {
+  review: boolean; selectedService: string; services: readonly Service[]; contact: SiteContact
+}) {
   const [enabled, setEnabled] = useState(false)
   const [error, setError] = useState('')
   const email = useRef<HTMLInputElement>(null)
@@ -100,8 +103,10 @@ export function Contact({ review, selectedService }: { review: boolean; selected
             <h3>Tell me about<br /><span>your project</span></h3>
             <p>Share the project goals, footage and deliverables. I’ll reply using the contact details you provide.</p>
             <div className="contact-tags">
-              <button className="glass" onClick={() => setService('video-editing')}>Video Editing</button>
-              <button className="glass" onClick={() => setService('motion-vfx')}>Motion &amp; VFX</button>
+              {['video-editing', 'motion-vfx'].map((id) => {
+                const item = services.find(([key]) => key === id)
+                return item && <button key={id} className="glass" onClick={() => setService(id)}>{item[1]}</button>
+              })}
               <button className="glass" onClick={() => setFormat('reels')}>Reels &amp; Shorts</button>
               <button className="glass" onClick={() => setFormat('long-form')}>Long-form</button>
             </div>
@@ -128,9 +133,9 @@ export function Contact({ review, selectedService }: { review: boolean; selected
             const value = (field: string) => String(data.get(field) ?? '').trim()
             const projectType = projectTypes.find(([key]) => key === format)?.[1]
             const serviceName = services.find(([key]) => key === service)?.[1]
-            if (!projectType || !serviceName) return
-            window.location.assign(whatsappDraft([
-              ['Name', value('name')], ['Project type', projectType], ['Service', serviceName],
+            if (!projectType || (services.length && !serviceName)) return
+            window.location.assign(whatsappDraft(contact.whatsapp, [
+              ['Name', value('name')], ['Project type', projectType], ['Service', serviceName ?? ''],
               ['Project brief', value('brief')], ['Budget', value('budget')], ['Deadline', value('deadline')],
               ['Email', value('email')], ['WhatsApp phone', value('whatsapp')],
             ]))
@@ -143,7 +148,7 @@ export function Contact({ review, selectedService }: { review: boolean; selected
               {projectTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select></label>
           </div>
-          <label>Service *<select name="serviceId" value={service} onChange={(event) => setService(event.target.value)} required>
+          <label>Service{services.length ? ' *' : ''}<select name="serviceId" value={service} onChange={(event) => setService(event.target.value)} required={!!services.length} disabled={!services.length}>
             <option value="">Select a service</option>
             {services.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select></label>
@@ -163,7 +168,7 @@ export function Contact({ review, selectedService }: { review: boolean; selected
           <button type="submit" className="whatsapp glass" disabled={!enabled}>Continue on WhatsApp ↗</button>
           <p className="form-hint whatsapp-hint">Review and send your draft in WhatsApp.</p>
           <div className="form-pair social-links">
-            {ownerSocialLinks.map(({ label, href }) => <a className="glass" key={href} href={href} target="_blank" rel="noopener noreferrer">{label} ↗</a>)}
+            {ownerSocialLinks(contact).map(({ label, href }) => <a className="glass" key={href} href={href} target="_blank" rel="noopener noreferrer">{label} ↗</a>)}
           </div>
         </form>
       </div>
@@ -171,14 +176,14 @@ export function Contact({ review, selectedService }: { review: boolean; selected
   )
 }
 
-export function Footer() {
+export function Footer({ contact }: { contact: SiteContact }) {
   return (
     <footer className="site-footer container">
       <div className="footer-meta">
         <span className="eyebrow">Video Editor &amp; Motion Designer</span>
         <div className="footer-links">
-          {ownerSocialLinks.map(({ label, href }) => <a className="glass" key={href} href={href} target="_blank" rel="noopener noreferrer">{label}</a>)}
-          <a className="glass" href={ownerEmailLink}>Email</a>
+          {ownerSocialLinks(contact).map(({ label, href }) => <a className="glass" key={href} href={href} target="_blank" rel="noopener noreferrer">{label}</a>)}
+          <a className="glass" href={ownerEmailLink(contact.email)}>Email</a>
         </div>
       </div>
       <div className="footer-wordmark" data-text="ABDELRAHMAN" aria-hidden="true">ABDELRAHMAN</div>

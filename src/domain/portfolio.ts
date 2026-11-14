@@ -7,6 +7,8 @@ export type MediaKind = 'image' | 'video' | 'audio' | 'captions'
 export interface PublishedMedia<Kind extends MediaKind = MediaKind> {
   readonly id: string
   readonly kind: Kind
+  readonly url?: string
+  readonly smallUrl?: string
   readonly width?: number
   readonly height?: number
   readonly durationMs?: number

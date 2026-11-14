@@ -34,7 +34,10 @@ export function WorkProject({ items, index, description }: { items: readonly Pla
   return (
     <article className="long-form-project">
       <button className="long-form-cover" aria-label={`Open ${item.title}`} onClick={(event) => showVideo(items, index, event.currentTarget)}>
-        <img src={item.poster} alt="" loading="lazy" /><span className="glass round-play"><PlayIcon /></span>
+        <picture>
+          {item.smallPoster && <source media="(max-width: 767px) and (max-resolution: 1.5dppx)" srcSet={item.smallPoster} />}
+          <img src={item.poster} alt="" loading="lazy" />
+        </picture><span className="glass round-play"><PlayIcon /></span>
       </button>
       <h2 lang={item.locale} dir={textDirection[item.locale]}>{item.title}</h2>
       {description && <p lang={description.locale} dir={textDirection[description.locale]}>{description.value}</p>}

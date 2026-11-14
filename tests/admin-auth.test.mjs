@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -21,7 +21,7 @@ const cloudApi = 'https://api.cloudinary.com/v1_1/fixture-media'
 const digest = (fields) => createHash('sha256')
   .update(Object.keys(fields).sort().map((key) => key + '=' + fields[key]).join('&') + cloudSecret).digest('hex')
 
-test('admin auth and authenticated media uploads against local provider stubs', async (t) => {
+test('admin auth, media and site content against local provider stubs', async (t) => {
   const tokens = new Map()
   const refreshTokens = new Map()
   let serial = 0
@@ -32,6 +32,15 @@ test('admin auth and authenticated media uploads against local provider stubs', 
   const drafts = new Map()
   let verificationMismatch = true
   let databaseUnavailable = true
+  const copies = new Map()
+  const cdn = 'https://res.cloudinary.com/fixture-media'
+  let cdnReady = false
+  const content = {
+    site_services: [{ id: 'video-editing', title: 'Video Editing', description: 'Approved fixture copy.', display_order: 10, visible: true }],
+    site_faq: [{ id: randomUUID(), question: 'Existing question?', answer: 'Existing answer.', display_order: 10, published: true }],
+    site_contact: [{ id: true, email: 'owner@example.test', whatsapp: 'https://wa.me/201007372106',
+      instagram: 'https://www.instagram.com/abdo_ve1/', tiktok: 'https://www.tiktok.com/@abdo_ve_1' }],
+  }
 
   function session(user, expiresIn = 3600) {
     const now = Math.floor(Date.now() / 1000)
@@ -52,8 +61,49 @@ test('admin auth and authenticated media uploads against local provider stubs', 
       res.writeHead(status, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify(value))
     }
-    if (url.pathname.startsWith('/v1_1/fixture-media/resources/')) {
+    const body = async () => {
+      let raw = ''
+      for await (const chunk of req) raw += chunk
+      return raw
+    }
+    if (url.pathname.startsWith('/fixture-media/')) {
+      const copy = copies.get(url.pathname.split('/').at(-1).split('.')[0])
+      if (!copy || !cdnReady) return send(404, {})
+      if (url.pathname.endsWith('.mp4')) {
+        assert.equal(req.headers.range, 'bytes=0-1')
+        return res.writeHead(206, { 'content-type': 'video/mp4', 'content-range': 'bytes 0-1/9999' }).end('00')
+      }
+      return res.writeHead(200, { 'content-type': url.pathname.endsWith('.webp') ? 'image/webp' : 'image/jpeg' }).end()
+    }
+    if (url.pathname.startsWith('/v1_1/fixture-media/')) {
       if (req.headers.authorization !== 'Basic ' + Buffer.from(cloudKey + ':' + cloudSecret).toString('base64')) return send(401, {})
+      if (url.pathname.endsWith('/upload') && req.method === 'POST') {
+        const resource = url.pathname.split('/').at(-2)
+        const form = await new Response(await body(), { headers: { 'content-type': req.headers['content-type'] } }).formData()
+        const input = new URL(form.get('file'))
+        const { signature, api_key, ...parameters } = Object.fromEntries(input.searchParams)
+        assert.equal(input.origin + input.pathname, cloudApi + '/' + resource + '/download')
+        assert.equal(parameters.type, 'authenticated')
+        assert.equal(api_key, cloudKey)
+        assert.equal(signature, digest(parameters))
+        assert.equal(form.get('async'), 'true')
+        assert.equal(form.get('eager_async'), 'true')
+        assert.equal(form.get('overwrite'), 'false')
+        assert.equal(form.get('type'), 'upload')
+        if (resource === 'video') {
+          assert.match(form.get('transformation'), /c_limit,f_mp4,fl_force_strip,h_1280,vc_h264,w_1280/)
+          assert.match(form.get('eager'), /w_360\/jpg\|.*w_720\/jpg/)
+        }
+        copies.set(form.get('public_id'), {
+          public_id: form.get('public_id'), asset_id: 'f'.repeat(32), resource_type: resource, type: 'upload',
+          format: form.get('format'), width: 640, height: 360, version: 1,
+        })
+        return send(200, { status: 'pending' })
+      }
+      if (url.pathname.includes('/upload/')) {
+        const copy = copies.get(url.pathname.split('/').at(-1))
+        return send(copy ? 200 : 404, copy ?? {})
+      }
       const asset = uploads.get(url.pathname.split('/').at(-1))
       if (!asset || !url.pathname.includes('/' + asset.resource_type + '/authenticated/')) return send(404, {})
       if (asset.resource_type === 'video' && url.searchParams.get('media_metadata') !== 'true') return send(400, {})
@@ -62,20 +112,86 @@ test('admin auth and authenticated media uploads against local provider stubs', 
     if (url.pathname === '/rest/v1/media_assets' && req.method === 'POST') {
       if (req.headers.apikey !== writerKey || membership !== 'active') return send(403, {})
       if (databaseUnavailable) return send(503, {})
-      let raw = ''
-      for await (const chunk of req) raw += chunk
-      const draft = JSON.parse(raw)
+      const draft = JSON.parse(await body())
       const asset = uploads.get(draft.cloudinary_public_id)
       if (!asset || draft.owner_id !== owner.id || draft.status !== 'draft' ||
         draft.delivery_type !== 'authenticated' || draft.cloudinary_asset_id !== asset.asset_id) return send(400, {})
-      drafts.set(draft.id, { ...draft, created_at: new Date().toISOString() })
+      drafts.set(draft.id, {
+        placement: 'work', project_format: 'reel', featured: false, display_order: 0, publication_revision: 0,
+        ...draft, created_at: new Date().toISOString(),
+      })
       return send(201, {})
     }
+    if (url.pathname === '/rest/v1/rpc/change_media_publication') {
+      const args = JSON.parse(await body())
+      if (req.headers.apikey !== writerKey || args.p_actor !== owner.id || membership !== 'active') return send(403, {})
+      const asset = drafts.get(args.p_id)
+      if (asset?.publication_revision !== args.p_revision) return send(200, 'stale')
+      if (args.p_command === 'queue') {
+        if (asset.preparation_started_at) return send(200, 'pending')
+        asset.preparation_started_at = new Date().toISOString()
+        return send(200, 'queued')
+      }
+      if (args.p_command === 'hide') asset.status = 'hidden'
+      else Object.assign(asset, args.p_settings)
+      if (args.p_command === 'publish') {
+        assert.ok(cdnReady && args.p_delivery.url.startsWith(cdn))
+        asset.status = 'published'
+        asset.public_delivery = args.p_delivery
+      }
+      asset.publication_revision++
+      return send(200, 'saved')
+    }
     if (req.headers.apikey !== publicKey) return send(401, {})
+    const table = url.pathname.split('/').at(-1)
+    if (Object.hasOwn(content, table)) {
+      const active = user?.id === owner.id && membership === 'active'
+      const rows = content[table]
+      const id = url.searchParams.get('id')?.slice(3)
+      if (req.method === 'GET') {
+        return send(200, rows.filter((row) => (id === undefined || String(row.id) === id) &&
+          (table === 'site_contact' || (active && !url.searchParams.has('visible') && !url.searchParams.has('published')) ||
+            row.visible || row.published)).sort((a, b) => a.display_order - b.display_order))
+      }
+      if (!active) return send(403, {})
+      if (req.method === 'POST') {
+        const row = { id: randomUUID(), ...JSON.parse(await body()) }
+        rows.push(row)
+        return send(201, [{ id: row.id }])
+      }
+      const index = rows.findIndex((row) => String(row.id) === id)
+      if (index < 0) return send(200, [])
+      const row = rows[index]
+      if (req.method === 'DELETE') rows.splice(index, 1)
+      else Object.assign(row, JSON.parse(await body()))
+      return send(200, [{ id: row.id }])
+    }
+    if (url.pathname === '/rest/v1/published_portfolio_media') {
+      const format = url.searchParams.get('project_format')?.slice(3)
+      const featured = url.searchParams.get('featured') === 'eq.true'
+      const placement = url.searchParams.get('placement')
+      const category = url.searchParams.get('category')
+      const rows = [...drafts.values()].filter((asset) => asset.status === 'published' && asset.resource_type === 'video' &&
+        asset.project_format === format && (!featured || asset.featured) &&
+        placement.includes(asset.placement) && (!category || category.includes(asset.category)))
+      rows.sort((a, b) => a.display_order - b.display_order)
+      return send(200, rows.map((asset) => ({
+        id: asset.id, title: asset.title, description: asset.description, project_format: asset.project_format,
+        category: asset.category, playback_url: asset.public_delivery.url, poster_url: asset.public_delivery.poster,
+        poster_small_url: asset.public_delivery.poster_small, width: asset.public_delivery.width,
+        height: asset.public_delivery.height, duration: asset.duration,
+      })))
+    }
     if (url.pathname === '/rest/v1/media_assets') {
       if (user?.id !== owner.id || membership !== 'active') return send(403, {})
       const id = url.searchParams.get('id')?.slice(3)
-      return send(200, id ? [...drafts.values()].filter((draft) => draft.id === id) : [...drafts.values()])
+      const images = url.searchParams.get('resource_type') === 'eq.image'
+      const rows = [...drafts.values()].filter((draft) =>
+        (!id || draft.id === id) && (!images || (draft.resource_type === 'image' && draft.status === 'published')) &&
+        (!url.searchParams.has('status') || url.searchParams.get('status') === 'eq.' + draft.status) &&
+        (!url.searchParams.has('featured') || draft.featured))
+      if (req.method === 'HEAD') return res.writeHead(200, { 'content-range': `0-${Math.max(0, rows.length - 1)}/${rows.length}` }).end()
+      return send(200, rows)
     }
     if (url.pathname === '/auth/v1/token') {
       let raw = ''
@@ -122,7 +238,8 @@ test('admin auth and authenticated media uploads against local provider stubs', 
     const original = globalThis.fetch
     globalThis.fetch = (input, init) => {
       const url = new URL(input instanceof Request ? input.url : input)
-      if (url.origin === 'https://api.cloudinary.com' && url.pathname.startsWith('/v1_1/fixture-media/')) {
+      if ((url.origin === 'https://api.cloudinary.com' && url.pathname.startsWith('/v1_1/fixture-media/')) ||
+          (url.origin === 'https://res.cloudinary.com' && url.pathname.startsWith('/fixture-media/'))) {
         return original(process.env.MEDIA_TEST_STUB + url.pathname + url.search, init)
       }
       return original(input, init)
@@ -167,6 +284,8 @@ test('admin auth and authenticated media uploads against local provider stubs', 
   assert.equal(await page.getByRole('link', { name: /sign up|register/i }).count(), 0)
   await page.goto(media)
   await assertDenied('')
+  await page.goto(admin + '/content/services')
+  await assertDenied('')
 
   await submit(owner, 'wrong-password')
   await assertDenied('?error=credentials')
@@ -200,9 +319,10 @@ test('admin auth and authenticated media uploads against local provider stubs', 
     await page.waitForURL(media)
     await page.getByRole('heading', { name: 'Media Library' }).waitFor()
     const file = page.getByLabel('File')
+    const uploadTitle = page.locator('form').filter({ has: file }).getByLabel('Title')
     const submitUpload = page.getByRole('button', { name: 'Upload draft' })
     const retry = page.getByRole('button', { name: 'Retry saving' })
-    await page.getByLabel('Title').fill('Fixture video')
+    await uploadTitle.fill('Fixture video')
     await file.setInputFiles({ name: 'unsupported.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg/>') })
     await submitUpload.click()
     await page.getByText('Choose a JPEG, PNG, WebP, MP4 or WebM file.').waitFor()
@@ -269,13 +389,13 @@ test('admin auth and authenticated media uploads against local provider stubs', 
       await anonymous.close()
     }
     assert.doesNotMatch(await page.content(), /fixture-cloudinary-secret|sb_secret_fixture/)
-    await page.getByLabel('Title').fill('Fixture image')
+    await uploadTitle.fill('Fixture image')
     await file.setInputFiles({ name: 'fixture.png', mimeType: 'image/png', buffer: bytes })
     await submitUpload.click()
     await page.getByRole('heading', { name: 'Fixture image' }).waitFor()
     assert.equal(drafts.size, 2)
     assert.equal(await page.getByRole('img', { name: 'Fixture image' }).count(), 1)
-    await page.getByLabel('Title').fill('Revoked upload')
+    await uploadTitle.fill('Revoked upload')
     await file.setInputFiles({ name: 'fixture.mp4', mimeType: 'video/mp4', buffer: bytes })
     membership = 'disabled'
     await submitUpload.click()
@@ -284,6 +404,253 @@ test('admin auth and authenticated media uploads against local provider stubs', 
     membership = 'active'
     await submit(owner)
     await dashboard.waitFor()
+  })
+
+  await t.test('publishes verified copies to selected sections and hides them without changing the Admin player', async () => {
+    const publicPage = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    const videoBytes = await readFile(new URL('../public/videos/showreel.mp4', import.meta.url))
+    await publicPage.route(cdn + '/**', async (route) => {
+      if (!route.request().url().endsWith('.mp4')) return route.fulfill({ status: 200, body: '' })
+      const [, first, last] = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range ?? '') ?? []
+      const start = Number(first ?? 0)
+      const end = last ? Math.min(+last, videoBytes.length - 1) : videoBytes.length - 1
+      return route.fulfill({
+        status: first === undefined ? 200 : 206,
+        headers: { 'content-type': 'video/mp4', 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${videoBytes.length}` },
+        body: videoBytes.subarray(start, end + 1),
+      })
+    })
+    const home = server.origin + '/'
+    const work = home + 'work'
+    const homeReels = publicPage.getByRole('region', { name: 'Featured reels' })
+    const play = publicPage.getByRole('button', { name: 'Play Published test Reel', exact: true })
+    await publicPage.goto(home)
+    assert.equal(await homeReels.count(), 0)
+    assert.match(await publicPage.locator('.hero-poster video').getAttribute('src'), /^\/videos\/showreel\.mp4$/)
+    await page.goto(media)
+    const card = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Fixture video' }) })
+    const originalPreview = await card.locator('video').getAttribute('src')
+    assert.equal(await card.locator('video').getAttribute('preload'), 'none')
+    assert.notEqual(await card.locator('video').getAttribute('controls'), null)
+    await card.getByText('Publication settings', { exact: true }).click()
+    await card.getByLabel('Title').fill('Published test Reel')
+    await card.getByLabel('Placement').selectOption('both')
+    await card.getByLabel('Feature on Home').check()
+    await card.getByLabel('Display order').fill('10')
+    await card.getByLabel('Work category').selectOption('product')
+    page.once('dialog', (dialog) => dialog.dismiss())
+    await card.getByRole('button', { name: 'Publish', exact: true }).click()
+    assert.equal(copies.size, 0)
+    const accept = () => page.once('dialog', (dialog) => dialog.accept())
+    accept()
+    await card.getByRole('button', { name: 'Publish', exact: true }).click()
+    await card.getByText(/Cloudinary is preparing/).waitFor()
+    assert.equal(copies.size, 1)
+    assert.equal(await card.getByText('draft', { exact: true }).count(), 1)
+    accept()
+    await card.getByRole('button', { name: 'Check and publish', exact: true }).click()
+    await card.getByText(/Cloudinary is preparing/).waitFor()
+    assert.equal(copies.size, 1)
+    await publicPage.reload()
+    assert.equal(await homeReels.count(), 0)
+    cdnReady = true
+    accept()
+    await card.getByRole('button', { name: 'Check and publish', exact: true }).click()
+    const published = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Published test Reel' }) })
+    await published.getByText('published', { exact: true }).waitFor()
+    assert.equal(await published.locator('video').getAttribute('src'), originalPreview)
+
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+      await publicPage.setViewportSize(viewport)
+      const result = await publicPage.goto(home)
+      assert.doesNotMatch(await result.text(), /fixture-cloudinary-secret|sb_secret_fixture|abdel-media-/)
+      await homeReels.waitFor()
+      const reel = homeReels.locator('video')
+      assert.equal(await reel.getAttribute('src'), null)
+      await play.click()
+      await homeReels.getByRole('button', { name: 'Pause Published test Reel' }).waitFor()
+      await reel.evaluate((node) => { node.muted = true })
+      await publicPage.waitForFunction(() => document.querySelector('.home-rail video')?.currentTime > 0.15)
+      assert.equal(await publicPage.getByRole('dialog').count(), 0)
+      assert.match(await reel.getAttribute('src'), /\/video\/upload\//)
+    }
+
+    await publicPage.goto(work + '?category=product')
+    await publicPage.getByRole('region', { name: 'Work reels' }).getByRole('button', { name: 'Play Published test Reel' }).waitFor()
+    await publicPage.goto(work + '?category=travel')
+    assert.equal(await publicPage.getByRole('region', { name: 'Work reels' }).count(), 0)
+    const extra = ['home-only', 'both'].map((id, index) => ({
+      ...[...drafts.values()].find(({ resource_type }) => resource_type === 'video'),
+      id, title: id, placement: index ? 'both' : 'home', display_order: 8 + index,
+    }))
+    for (const asset of extra) drafts.set(asset.id, asset)
+    await publicPage.setViewportSize({ width: 1440, height: 900 })
+    await publicPage.goto(home)
+    assert.equal(await homeReels.locator('.reel-cover').count(), 3)
+    await homeReels.getByRole('button', { name: 'Go to reel 1' }).click()
+    assert.match(await homeReels.locator('[data-slot="active"] .inline-toggle').getAttribute('aria-label'), /home-only/)
+    await publicPage.setViewportSize({ width: 390, height: 844 })
+    await publicPage.waitForFunction(() => document.querySelectorAll('.home-rail .reel-cover[inert]').length === 2)
+    await publicPage.goto(work)
+    assert.equal(await publicPage.getByRole('button', { name: 'Play home-only', exact: true }).count(), 0)
+    for (const asset of extra) drafts.delete(asset.id)
+    const form = published.getByRole('form')
+    await form.getByLabel('Placement').selectOption('work')
+    await form.getByLabel('Format').selectOption('long-form')
+    await form.getByLabel('Long-form description').fill('A test clip.')
+    accept()
+    await form.getByRole('button', { name: 'Save settings' }).click()
+    await form.getByText('Display settings saved.').waitFor()
+    await publicPage.goto(home)
+    assert.equal(await homeReels.count(), 0)
+    await publicPage.goto(work + '?format=long-form')
+    const opener = publicPage.getByRole('button', { name: 'Open Published test Reel' })
+    await opener.click()
+    const dialog = publicPage.getByRole('dialog')
+    await dialog.getByRole('button', { name: 'Play video' }).click()
+    await dialog.getByRole('button', { name: 'Pause', exact: true }).waitFor()
+    await dialog.getByRole('button', { name: 'Close' }).click()
+    await dialog.waitFor({ state: 'hidden' })
+    await publicPage.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Open Published test Reel')
+
+    accept()
+    await form.getByRole('button', { name: 'Hide', exact: true }).click()
+    await published.getByText('hidden', { exact: true }).waitFor()
+    await publicPage.reload()
+    assert.equal(await opener.count(), 0)
+    assert.equal(await published.locator('video').getAttribute('src'), originalPreview)
+    const image = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Fixture image' }) })
+    await image.getByText('Publication settings', { exact: true }).click()
+    accept()
+    await image.getByRole('button', { name: 'Publish', exact: true }).click()
+    await image.getByText(/Cloudinary is preparing/).waitFor()
+    accept()
+    await image.getByRole('button', { name: 'Check and publish', exact: true }).click()
+    await image.getByText('published', { exact: true }).waitFor()
+    await publicPage.reload()
+    assert.equal(await publicPage.getByText('Fixture image', { exact: true }).count(), 0)
+
+    membership = 'disabled'
+    accept()
+    await form.getByRole('button', { name: 'Publish', exact: true }).click()
+    await assertDenied('?error=denied')
+    assert.equal([...drafts.values()].find(({ resource_type }) => resource_type === 'video').status, 'hidden')
+    membership = 'active'
+    await submit(owner)
+    await dashboard.waitFor()
+    await publicPage.close()
+  })
+
+  await t.test('owner manages site content and sees database counts', async () => {
+    const homepage = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const count = async (label) => (await page.locator('dl div').filter({ has: page.getByText(label, { exact: true }) }).locator('dd').textContent())
+      assert.equal(await count('Total media assets'), '2')
+      assert.equal(await count('Published'), '1')
+      assert.equal(await count('Draft'), '0')
+      assert.equal(await count('Hidden'), '1')
+      assert.equal(await count('Featured Home Reels'), '0')
+      await page.getByRole('link', { name: 'Services', exact: true }).click()
+      const add = page.getByRole('form', { name: 'Add service', exact: true })
+      await add.getByLabel('Title').fill('CMS test service')
+      await add.getByLabel('Description').fill('A description from the test database.')
+      await add.getByLabel('Display order').fill('0')
+      await add.getByRole('button', { name: 'Add service' }).click()
+      await add.getByRole('status').waitFor()
+      const service = page.locator('summary').filter({ hasText: 'CMS test service' })
+      await service.click()
+      const serviceForm = page.getByRole('form', { name: 'CMS test service' })
+      await homepage.goto(server.origin)
+      assert.equal(await homepage.getByRole('heading', { name: 'CMS test service' }).count(), 0)
+      await serviceForm.getByLabel('Visibility').selectOption('yes')
+      await serviceForm.getByRole('button', { name: 'Save changes' }).click()
+      await serviceForm.getByRole('status').waitFor()
+      const link = homepage.getByRole('link', { name: 'Ask about CMS test service' })
+      await homepage.reload()
+      assert.equal(await homepage.locator('#services li').first().getByRole('heading').textContent(), 'CMS test service')
+      await link.click()
+      await homepage.waitForURL('**/?service=*#contact')
+      assert.match(await homepage.locator('select[name="serviceId"] option:checked').textContent(), /CMS test service/)
+
+      await page.goto(admin + '/content/faq')
+      const addQuestion = page.getByRole('form', { name: 'Add question', exact: true })
+      await addQuestion.getByLabel('Question', { exact: true }).fill('CMS test question?')
+      await addQuestion.getByLabel('Answer').fill('A CMS answer.')
+      await addQuestion.getByLabel('Display order').fill('0')
+      await addQuestion.getByLabel('Visibility').selectOption('yes')
+      await addQuestion.getByRole('button', { name: 'Add question' }).click()
+      await addQuestion.getByRole('status').waitFor()
+      await homepage.setViewportSize({ width: 390, height: 844 })
+      await homepage.goto(server.origin + '/#faq')
+      const question = homepage.getByRole('button', { name: 'CMS test question?' })
+      assert.equal(await question.getAttribute('aria-expanded'), 'true')
+      await question.click()
+      assert.equal(await question.getAttribute('aria-expanded'), 'false')
+      assert.ok(await homepage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+      const questionEntry = page.locator('li').filter({ has: page.locator('summary').filter({ hasText: 'CMS test question?' }) })
+      await questionEntry.locator('summary').filter({ hasText: 'CMS test question?' }).click()
+      const questionForm = questionEntry.getByRole('form', { name: 'CMS test question?', exact: true })
+      await questionForm.getByLabel('Visibility').selectOption('no')
+      await questionForm.getByRole('button', { name: 'Save changes' }).click()
+      await questionForm.getByRole('status').waitFor()
+      await homepage.reload()
+      assert.equal(await question.count(), 0)
+      await questionEntry.getByText('Delete question', { exact: true }).click()
+      const deletion = page.getByRole('form', { name: 'Delete CMS test question?' })
+      await deletion.getByRole('button', { name: 'Delete permanently' }).click()
+      assert.equal(content.site_faq.length, 2)
+      await deletion.getByRole('checkbox').check()
+      await deletion.getByRole('button', { name: 'Delete permanently' }).click()
+      await deletion.waitFor({ state: 'detached' })
+      await homepage.reload()
+      assert.equal(await question.count(), 0)
+
+      await page.goto(admin + '/content/services')
+      await service.click()
+      await serviceForm.getByLabel('Visibility').selectOption('no')
+      await serviceForm.getByRole('button', { name: 'Save changes' }).click()
+      await serviceForm.getByRole('status').waitFor()
+      await homepage.goto(server.origin)
+      assert.equal(await homepage.getByRole('heading', { name: 'CMS test service' }).count(), 0)
+
+      await page.goto(admin + '/content/settings')
+      const settings = page.getByRole('form', { name: 'Public contact settings' })
+      await settings.getByLabel('Instagram profile').fill('https://instagram.com.evil.example/owner')
+      await settings.getByRole('button', { name: 'Save settings' }).click()
+      await settings.getByRole('alert').waitFor()
+      assert.equal(content.site_contact[0].instagram, 'https://www.instagram.com/abdo_ve1/')
+      await settings.getByLabel('Public email').fill('projects+portfolio@example.test')
+      await settings.getByLabel('WhatsApp destination').fill('https://wa.me/201234567890')
+      await settings.getByLabel('Instagram profile').fill('https://www.instagram.com/project.profile/')
+      await settings.getByRole('button', { name: 'Save settings' }).click()
+      await settings.getByRole('status').waitFor()
+      await homepage.goto(server.origin + '/#contact')
+      await homepage.reload()
+      assert.match(await homepage.getByRole('link', { name: 'Email', exact: true }).getAttribute('href'), /^mailto:projects%2Bportfolio@example.test/)
+      assert.equal(await homepage.locator('#contact').getByRole('link', { name: /Instagram/ }).getAttribute('href'), content.site_contact[0].instagram)
+      await homepage.locator('input[name="name"]').fill('Test visitor')
+      await homepage.locator('select[name="projectTypeId"]').selectOption('reels')
+      await homepage.locator('select[name="serviceId"]').selectOption('video-editing')
+      await homepage.locator('textarea[name="brief"]').fill('A project brief for testing.')
+      await homepage.locator('input[name="email"]').fill('visitor@example.test')
+      await homepage.route('https://wa.me/**', (route) => route.fulfill({ status: 200, body: 'Fixture' }))
+      const outbound = homepage.waitForRequest('https://wa.me/**')
+      await homepage.getByRole('button', { name: /Continue on WhatsApp/ }).click()
+      const url = new URL((await outbound).url())
+      assert.equal(url.pathname, '/201234567890')
+      assert.match(url.searchParams.get('text'), /Service: Video Editing/)
+
+      membership = 'disabled'
+      await settings.getByLabel('Public email').fill('revoked@example.test')
+      await settings.getByRole('button', { name: 'Save settings' }).click()
+      await assertDenied('?error=denied')
+      assert.equal(content.site_contact[0].email, 'projects+portfolio@example.test')
+      membership = 'active'
+      await submit(owner)
+      await dashboard.waitFor()
+    } finally {
+      await homepage.close()
+    }
   })
 
   // Seed a session issued by the local fixture whose access token needs refreshing.

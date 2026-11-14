@@ -81,7 +81,10 @@ export function InlineVideo({ item, slot, inactive = false, onStart, canStart }:
   return (
     <div className="inline-video reel-cover" ref={frame}
       inert={inactive} aria-hidden={inactive || undefined} data-slot={slot} data-playing={playing} data-has-frame={hasFrame}>
-      <img src={item.poster} alt="" loading="lazy" draggable="false" />
+      <picture>
+        {item.smallPoster && <source media="(max-width: 767px) and (max-resolution: 1.5dppx)" srcSet={item.smallPoster} />}
+        <img src={item.poster} alt="" loading="lazy" draggable="false" />
+      </picture>
       <video ref={video} muted={muted} playsInline preload="none" aria-hidden="true"
         onPlaying={() => { setHasFrame(true); setPlaying(true) }}
         onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)}

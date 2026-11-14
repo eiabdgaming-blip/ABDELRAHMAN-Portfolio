@@ -18,3 +18,28 @@
 }
 .shell button { min-height: 44px; }
 .error { color: var(--color-error); }
+
+.shell:has([data-content-admin]) { width: min(100% - 40px, 900px); }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.controls + h2, .editor + h2 { margin-top: 24px; }
+.statistics {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 138px), 1fr));
+  gap: 10px; margin: 12px 0 24px;
+}
+.statistics div, .contentList li, .editor {
+  padding: 12px; background: var(--color-charcoal); border: 1px solid var(--color-divider); border-radius: 10px;
+}
+.statistics dd { font-size: 1.25rem; margin: 4px 0 0; }
+.contentList { display: grid; gap: 8px; list-style: none; margin: 12px 0 20px; padding: 0; }
+.contentList summary { cursor: pointer; }
+.contentList summary span, .contentList time, .mediaStatus { color: var(--color-muted); }
+.mediaStatus { text-transform: capitalize; }
+.editor { margin-top: 10px; }
+.editor fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 10px; }
+.editor label { display: grid; gap: 4px; }
+.editor :is(input, textarea, select) {
+  width: 100%; padding: 8px; color: inherit; background: var(--color-background);
+  border: 1px solid var(--color-divider); border-radius: 6px;
+}
+.deleteQuestion { margin-top: 12px; }
+.deleteQuestion form { display: grid; gap: 8px; justify-items: start; margin-top: 8px; }
