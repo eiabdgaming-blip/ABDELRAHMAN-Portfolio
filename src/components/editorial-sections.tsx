@@ -9,7 +9,8 @@ import { ProfileIcon } from './profile-icon'
 import { reviewMedia } from '../domain/display'
 import { projectTypes } from '../domain/editorial'
 import type { Question, Service, SiteContact } from '../domain/site-content'
-import { ownerEmailLink, ownerSocialLinks, whatsappDraft } from '../domain/contact'
+import { ownerEmailLink, ownerSocialLinks } from '../domain/contact'
+import { leadFieldsList, phonePattern, validateLead, type LeadField } from '../domain/leads'
 import { AmbientMedia } from './ambient'
 import { PlayIcon } from './icons'
 import { useMediaExperience } from './media-experience'
@@ -87,11 +88,21 @@ export function Contact({ review, selectedService, services, contact }: {
 }) {
   const [enabled, setEnabled] = useState(false)
   const [error, setError] = useState('')
-  const email = useRef<HTMLInputElement>(null)
-  const phone = useRef<HTMLInputElement>(null)
+  const [errors, setErrors] = useState<Partial<Record<LeadField, string>>>({})
+  const [phase, setPhase] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [receipt, setReceipt] = useState<{ whatsapp: string; email: string }>()
+  const saving = useRef(false)
+  const retry = useRef<{ payload: string; token: string }>(undefined)
+  const successLink = useRef<HTMLAnchorElement>(null)
   const [service, setService] = useState(selectedService)
   const [format, setFormat] = useState('')
   useEffect(() => setEnabled(true), [])
+  useEffect(() => { if (phase === 'saved') successLink.current?.focus({ preventScroll: true }) }, [phase])
+  const field = (key: LeadField) => ({
+    'aria-invalid': errors[key] ? true as const : undefined,
+    'aria-describedby': errors[key] ? `contact-error-${key}` : undefined,
+  })
+  const hint = (key: LeadField) => errors[key] && <span className="form-error" id={`contact-error-${key}`} role="alert">{errors[key]}</span>
   return (
     <section id="contact" className="contact" tabIndex={-1} aria-labelledby="contact-heading" data-ambient-section>
       <div className="section-intro">
@@ -118,60 +129,86 @@ export function Contact({ review, selectedService, services, contact }: {
             <Illustration review={review} />
           </div>
         </div>
-        <form className="contact-form" method="post" onChange={() => { if (error) setError('') }}
-          onSubmit={(event) => {
+        <form className="contact-form" method="post" aria-busy={phase === 'saving'} noValidate onChange={(event) => {
+          const target: EventTarget = event.target
+          if ((target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement) &&
+            leadFieldsList.includes(target.name as LeadField)) setErrors((previous) => ({ ...previous, [target.name]: undefined }))
+          setError('')
+        }}
+          onSubmit={async (event) => {
             event.preventDefault()
-            const data = new FormData(event.currentTarget)
-            for (const [field, message] of [['name', 'Enter your name.'], ['brief', 'Enter a project brief.']]) {
-              if (!String(data.get(field) ?? '').trim()) {
-                const control = event.currentTarget.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement
-                control.setCustomValidity(message)
-                control.reportValidity()
-                return
+            if (saving.current || phase === 'saved') return
+            const form = event.currentTarget
+            const data = Object.fromEntries(new FormData(form))
+            const checked = validateLead(data)
+            if (services.length && !services.some(([key]) => key === checked.values.serviceId)) checked.errors.serviceId = 'Choose a service.'
+            const showErrors = (issues: typeof errors) => {
+              setErrors(issues)
+              const first = leadFieldsList.find((key) => issues[key])
+              if (first) (form.elements.namedItem(first) as HTMLElement | null)?.focus()
+            }
+            if (Object.keys(checked.errors).length) { showErrors(checked.errors); return }
+            saving.current = true
+            setPhase('saving')
+            setError('')
+            setErrors({})
+            let saved = false
+            try {
+              const payload = JSON.stringify(checked.values)
+              if (retry.current?.payload !== payload) {
+                const uuid = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() :
+                  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0'))
+                    .join('').replace(/^(........)(....)(....)(....)(............)$/, '$1-$2-$3-$4-$5')
+                retry.current = { payload, token: uuid }
               }
-            }
-            if (!email.current?.value.trim() && !phone.current?.value.trim()) {
-              setError('Add a valid email address or WhatsApp phone number.')
-              email.current?.focus()
-              return
-            }
-            const value = (field: string) => String(data.get(field) ?? '').trim()
-            const projectType = projectTypes.find(([key]) => key === format)?.[1]
-            const serviceName = services.find(([key]) => key === service)?.[1]
-            if (!projectType || (services.length && !serviceName)) return
-            window.location.assign(whatsappDraft(contact.whatsapp, [
-              ['Name', value('name')], ['Project type', projectType], ['Service', serviceName ?? ''],
-              ['Project brief', value('brief')], ['Budget', value('budget')], ['Deadline', value('deadline')],
-              ['Email', value('email')], ['WhatsApp phone', value('whatsapp')],
-            ]))
+              const result = await fetch('/api/contact', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...checked.values, website: data.website ?? '', token: retry.current.token }),
+                signal: AbortSignal.timeout(12000),
+              })
+              const reply = await result.json()
+              if (result.ok && typeof reply.whatsapp === 'string' && typeof reply.email === 'string') {
+                saved = true
+                setReceipt(reply)
+                setPhase('saved')
+              } else if (reply.errors) showErrors(reply.errors)
+              else setError(reply.message || 'The inquiry could not be saved. Please try again.')
+            } catch { setError('Saving could not be confirmed. Retry safely or use the email link.') }
+            finally { saving.current = false; if (!saved) setPhase('idle') }
           }}>
+          <div hidden><label>Leave blank<input name="website" tabIndex={-1} autoComplete="off" /></label></div>
           <div className="form-pair contact-name">
-            <label>Name *<input name="name" autoComplete="name" placeholder="Your name" required maxLength={100}
-              onInput={(event) => event.currentTarget.setCustomValidity('')} /></label>
-            <label>Project type *<select name="projectTypeId" value={format} onChange={(event) => setFormat(event.target.value)} required>
+            <label>Name *<input name="name" autoComplete="name" placeholder="Your name" required maxLength={100} {...field('name')} />{hint('name')}</label>
+            <label>Project type *<select name="projectTypeId" value={format} onChange={(event) => setFormat(event.target.value)} required {...field('projectTypeId')}>
               <option value="">Select project type</option>
               {projectTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select></label>
+            </select>{hint('projectTypeId')}</label>
           </div>
-          <label>Service{services.length ? ' *' : ''}<select name="serviceId" value={service} onChange={(event) => setService(event.target.value)} required={!!services.length} disabled={!services.length}>
+          <label>Service{services.length ? ' *' : ''}<select name="serviceId" value={service} onChange={(event) => setService(event.target.value)} required={!!services.length} disabled={!services.length} {...field('serviceId')}>
             <option value="">Select a service</option>
             {services.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select></label>
-          <label>Project brief *<textarea name="brief" placeholder="Goals, footage and deliverables" required maxLength={3000} rows={3}
-            onInput={(event) => event.currentTarget.setCustomValidity('')} /></label>
+          </select>{hint('serviceId')}</label>
+          <label>Project brief *<textarea name="brief" placeholder="Goals, footage and deliverables" required maxLength={3000} rows={3} {...field('brief')} />{hint('brief')}</label>
           <div className="form-pair">
-            <label>Budget<input name="budget" placeholder="Optional" maxLength={100} /></label>
-            <label>Deadline<input name="deadline" placeholder="Optional" maxLength={100} /></label>
+            <label>Budget<input name="budget" placeholder="Optional" maxLength={100} {...field('budget')} />{hint('budget')}</label>
+            <label>Deadline<input name="deadline" placeholder="Optional" maxLength={100} {...field('deadline')} />{hint('deadline')}</label>
           </div>
           <div className="form-pair contact-channels">
-            <label>Email<input ref={email} type="email" name="email" placeholder="Email address" autoComplete="email"
-              aria-invalid={!!error || undefined} aria-describedby="reply-hint" /></label>
-            <label>WhatsApp phone<input ref={phone} type="tel" name="whatsapp" placeholder="Include country code" autoComplete="tel"
-              pattern={'\\+[1-9][0-9]{7,14}'} aria-invalid={!!error || undefined} aria-describedby="reply-hint" /></label>
+            <label>Email<input type="email" name="email" placeholder="Email address" autoComplete="email" maxLength={254}
+              {...field('email')} aria-describedby={errors.email ? 'reply-hint contact-error-email' : 'reply-hint'} />{hint('email')}</label>
+            <label>WhatsApp phone<input type="tel" name="whatsapp" placeholder="Include country code" autoComplete="tel" maxLength={16}
+              pattern={phonePattern.source.slice(1, -1)} {...field('whatsapp')}
+              aria-describedby={errors.whatsapp ? 'reply-hint contact-error-whatsapp' : 'reply-hint'} />{hint('whatsapp')}</label>
           </div>
-          <p id="reply-hint" className={error ? 'form-error' : 'form-hint'} role={error ? 'alert' : undefined}>{error || 'Add at least one valid reply channel.'}</p>
-          <button type="submit" className="whatsapp glass" disabled={!enabled}>Continue on WhatsApp ↗</button>
-          <p className="form-hint whatsapp-hint">Review and send your draft in WhatsApp.</p>
+          <p id="reply-hint" className="form-hint">Add at least one valid reply channel.</p>
+          {error && <p className="form-error" role="alert">{error}</p>}
+          {receipt ? <>
+            <p className="form-hint" role="status">Inquiry saved. Open WhatsApp to review and send your message.</p>
+            <a ref={successLink} className="whatsapp glass" href={receipt.whatsapp}>Continue on WhatsApp ↗</a>
+          </> : <button type="submit" className="whatsapp glass" disabled={!enabled || phase === 'saving'}>
+            {phase === 'saving' ? 'Saving inquiry…' : 'Save inquiry & continue ↗'}
+          </button>}
+          <p className="form-hint whatsapp-hint"><a href={receipt?.email ?? ownerEmailLink(contact.email)}>Contact by email</a></p>
           <div className="form-pair social-links">
             {ownerSocialLinks(contact).map(({ label, href }) => <a className="glass" key={href} href={href} target="_blank" rel="noopener noreferrer">{label} ↗</a>)}
           </div>

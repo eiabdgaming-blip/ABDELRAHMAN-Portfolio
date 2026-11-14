@@ -37,6 +37,8 @@ test('admin auth, media and site content against local provider stubs', async (t
   let cdnReady = false
   const projects = new Map()
   const feedback = new Map()
+  const leads = new Map()
+  const submissions = new Map()
   const voices = new Map()
   const oggBytes = await readFile(new URL('./fixtures/voice-opus.ogg', import.meta.url))
   const mp3Bytes = await readFile(new URL('./fixtures/voice.mp3', import.meta.url))
@@ -211,7 +213,36 @@ test('admin auth, media and site content against local provider stubs', async (t
       entries.set(id, row)
       return send(200, id)
     }
+    if (url.pathname.endsWith('/rpc/submit_contact_lead')) {
+      if (req.headers.apikey !== writerKey) return send(403, {})
+      const { p_token, p_fingerprint, p_email_key, p_phone_key, p_lead } = JSON.parse(await body())
+      const past = submissions.get(p_token)
+      if (past) return send(200, past.hash === p_fingerprint ? 'saved' : 'conflict')
+      if ([...submissions.values()].some(({ hash }) => hash === p_fingerprint)) return send(200, 'saved')
+      if ([...submissions.values()].filter(({ email, phone }) =>
+        (email && email === p_email_key) || (phone && phone === p_phone_key)).length >= 3) return send(200, 'limited')
+      submissions.set(p_token, { hash: p_fingerprint, email: p_email_key, phone: p_phone_key })
+      const id = randomUUID()
+      leads.set(id, { ...p_lead, id, status: 'new', owner_notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      return send(200, 'saved')
+    }
     if (req.headers.apikey !== publicKey) return send(401, {})
+    if (url.pathname.endsWith('/rest/v1/contact_leads')) {
+      if (user?.id !== owner.id || membership !== 'active') return send(403, {})
+      const status = url.searchParams.get('status')?.slice(3)
+      const filter = url.searchParams.get('or')
+      const search = filter?.match(/name\.ilike\."%([^%]+)%"/)?.[1].toLowerCase()
+      const rows = [...leads.values()].filter((row) => (!status || row.status === status) &&
+        (!search || row.name.toLowerCase().includes(search) || row.email?.toLowerCase().includes(search)))
+      if (req.method === 'HEAD') return res.writeHead(200, { 'content-range': `0-${Math.max(0, rows.length - 1)}/${rows.length}` }).end()
+      if (req.method === 'PATCH') {
+        const lead = leads.get(url.searchParams.get('id')?.slice(3))
+        if (!lead || lead.updated_at !== url.searchParams.get('updated_at')?.slice(3)) return send(200, [])
+        Object.assign(lead, JSON.parse(await body()), { updated_at: new Date().toISOString() })
+        return send(200, [{ id: lead.id }])
+      }
+      return send(200, rows)
+    }
     const table = url.pathname.split('/').at(-1)
     if (table === 'portfolio_projects' || table === 'portfolio_feedback') {
       if (user?.id !== owner.id || membership !== 'active') return send(200, [])
@@ -746,7 +777,9 @@ test('admin auth, media and site content against local provider stubs', async (t
       await homepage.locator('input[name="email"]').fill('visitor@example.test')
       await homepage.route('https://wa.me/**', (route) => route.fulfill({ status: 200, body: 'Fixture' }))
       const outbound = homepage.waitForRequest('https://wa.me/**')
-      await homepage.getByRole('button', { name: /Continue on WhatsApp/ }).click()
+      await homepage.getByRole('button', { name: /Save inquiry/ }).click()
+      await homepage.getByText(/Inquiry saved/).waitFor()
+      await homepage.getByRole('link', { name: /Continue on WhatsApp/ }).click()
       const url = new URL((await outbound).url())
       assert.equal(url.pathname, '/201234567890')
       assert.match(url.searchParams.get('text'), /Service: Video Editing/)
@@ -762,6 +795,92 @@ test('admin auth, media and site content against local provider stubs', async (t
     } finally {
       await homepage.close()
     }
+  })
+
+  await t.test('saves private leads once, filters and updates them as the active owner', async () => {
+    const publicPage = await browser.newPage({ viewport: { width: 390, height: 844 } })
+    try {
+      await publicPage.goto(admin + '/leads')
+      await publicPage.waitForURL(login)
+      await publicPage.goto(server.origin + '/#contact')
+      const form = publicPage.locator('.contact-form')
+      const save = form.getByRole('button', { name: /Save inquiry/ })
+      await save.click()
+      await form.getByText('Enter your name.', { exact: true }).waitFor()
+      await form.locator('[name="name"]').fill('Mobile lead')
+      await form.locator('[name="projectTypeId"]').selectOption('reels')
+      await form.locator('[name="serviceId"]').selectOption('video-editing')
+      await form.locator('[name="brief"]').fill('A test inquiry <script>not executable</script>.')
+      await form.locator('[name="email"]').fill('mobile@example.test')
+      await form.locator('[name="whatsapp"]').fill('+201234567890')
+      const pending = publicPage.waitForRequest((request) => request.url().endsWith('/api/contact'))
+      await save.dblclick()
+      const request = await pending
+      await form.getByText(/Inquiry saved/).waitFor()
+      const handoff = new URL(await form.getByRole('link', { name: /Continue on WhatsApp/ }).getAttribute('href'))
+      assert.equal(handoff.pathname, '/201234567890')
+      assert.match(handoff.searchParams.get('text'), /Mobile lead.*\nProject type: Reels & Shorts/)
+      assert.match(await form.getByRole('link', { name: 'Contact by email' }).getAttribute('href'), /^mailto:projects%2Bportfolio@example.test/)
+      assert.equal(leads.size, 2)
+      const post = (data, extras = {}) => publicPage.request.post(server.origin + '/api/contact', { data, ...extras })
+      const payload = request.postDataJSON()
+      assert.equal((await post(payload)).status(), 200)
+      assert.equal((await post({ ...payload, token: randomUUID() })).status(), 200)
+      assert.equal((await post({ ...payload, brief: 'Changed' })).status(), 409)
+      assert.equal((await post({ ...payload, token: randomUUID(), website: 'spam' })).status(), 400)
+      assert.equal((await post({ ...payload, email: 'bad-email' })).status(), 422)
+      assert.equal((await post({ ...payload, serviceId: 'unknown' })).status(), 422)
+      assert.equal((await post({ ...payload, brief: 'x'.repeat(21000) })).status(), 413)
+      assert.equal((await post(payload, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status(), 403)
+      assert.equal(leads.size, 2)
+      for (let n = 1; n <= 3; n++) {
+        const response = await post({ ...payload, token: randomUUID(), brief: 'Test rate limit ' + n })
+        assert.equal(response.status(), n === 3 ? 429 : 200)
+      }
+      const inaccessible = await fetch(stubOrigin + '/rest/v1/contact_leads', { headers: { apikey: publicKey } })
+      assert.equal(inaccessible.status, 403)
+
+      await page.goto(admin)
+      const total = page.locator('dl div').filter({ hasText: 'Total leads' }).locator('dd')
+      assert.equal(await total.textContent(), '4')
+      await page.getByRole('link', { name: 'Leads', exact: true }).click()
+      await page.getByRole('heading', { name: 'Leads', exact: true }).waitFor()
+      const filters = page.getByRole('form', { name: 'Filter leads' })
+      await filters.getByLabel('Search by name or email').fill('mobile@example.test')
+      await filters.getByRole('button', { name: 'Apply filters' }).click()
+      await page.waitForURL(/q=mobile/)
+      // Open the original submission identified by the full brief.
+      const original = [...leads.values()].find(({ brief }) => brief.includes('not executable'))
+      const row = page.locator('#lead-' + original.id)
+      await row.locator('summary').click()
+      assert.equal(await row.locator('script').count(), 0)
+      assert.match(await row.getByRole('link', { name: 'Email mobile@example.test' }).getAttribute('href'), /^mailto:mobile@example.test/)
+      assert.equal(await row.getByRole('link', { name: 'WhatsApp +201234567890' }).getAttribute('href'), 'https://wa.me/201234567890')
+      await row.getByLabel('Status', { exact: true }).selectOption('in-progress')
+      await row.getByLabel('Private owner notes').fill('Private fixture note')
+      await row.getByRole('button', { name: 'Save changes' }).click()
+      await row.getByText('Inquiry updated.').waitFor()
+      assert.equal(original.status, 'in-progress')
+      assert.equal(original.owner_notes, 'Private fixture note')
+      await page.goto(admin)
+      assert.equal(await page.locator('dl div').filter({ hasText: 'In-progress inquiries' }).locator('dd').textContent(), '1')
+      await page.goto(admin + '/leads?status=in-progress')
+      await row.locator('summary').click()
+      await row.getByLabel('Status', { exact: true }).selectOption('archived')
+      await row.getByRole('button', { name: 'Save changes' }).click()
+      await page.getByText('No inquiries match.').waitFor()
+      assert.equal(original.status, 'archived')
+      await page.goto(admin + '/leads?status=archived')
+      await row.locator('summary').click()
+      membership = 'disabled'
+      await row.getByLabel('Private owner notes').fill('Unauthorized edit')
+      await row.getByRole('button', { name: 'Save changes' }).click()
+      await assertDenied('?error=denied')
+      assert.equal(original.owner_notes, 'Private fixture note')
+      membership = 'active'
+      await submit(owner)
+      await dashboard.waitFor()
+    } finally { await publicPage.close() }
   })
 
   await t.test('publishes project case studies and owner-approved feedback using prepared media', async () => {

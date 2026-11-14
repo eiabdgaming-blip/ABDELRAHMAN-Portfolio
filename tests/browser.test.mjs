@@ -509,34 +509,44 @@ test('public contact links and validated WhatsApp draft use the owner destinatio
       await popup.close()
     }
   }
-  assert.match(await page.getByRole('link', { name: 'Email' }).getAttribute('href'), /^mailto:eiabdgaming@gmail\.com(?:\?|$)/)
+  assert.match(await page.getByRole('link', { name: 'Email', exact: true }).getAttribute('href'), /^mailto:eiabdgaming@gmail\.com(?:\?|$)/)
   const posts = []
   page.on('request', (request) => { if (request.method() === 'POST') posts.push(request.url()) })
   const form = page.locator('.contact-form')
-  const submit = form.getByRole('button', { name: 'Continue on WhatsApp' })
+  const submit = form.getByRole('button', { name: /Save inquiry/ })
   await submit.click()
-  assert.equal(await form.getByLabel('Name').evaluate((node) => node.validity.valueMissing), true)
-  await form.getByLabel('Name').fill('Local Test')
+  assert.equal(await form.locator('[name="name"]').evaluate((node) => node.validity.valueMissing), true)
+  await form.locator('[name="name"]').fill('Local Test')
   await form.getByLabel('Project type').selectOption('reels')
   await form.getByLabel('Service').selectOption('video-editing')
   await form.getByLabel('Project brief').fill('أهلاً & an edit?\nSecond line.')
   await submit.click()
   assert.match(await form.getByRole('alert').textContent(), /valid email address or WhatsApp/)
-  await form.getByLabel('Email', { exact: true }).fill('test@example.invalid')
+  await form.locator('[name="email"]').fill('test@example.invalid')
   await form.getByLabel('WhatsApp phone').fill('123')
   await submit.click()
   assert.equal(await form.getByLabel('WhatsApp phone').evaluate((node) => node.validity.patternMismatch), true)
   await form.getByLabel('WhatsApp phone').fill('+12025550123')
   await form.getByLabel('Budget').fill('500 USD')
   await form.getByLabel('Deadline').fill('Next month')
+  await page.route('**/api/contact', (route) => {
+    const lead = route.request().postDataJSON()
+    const text = ['Name: ' + lead.name, 'Project type: Reels & Shorts', 'Service: Video Editing', 'Project brief: ' + lead.brief,
+      'Budget: ' + lead.budget, 'Deadline: ' + lead.deadline, 'Email: ' + lead.email, 'WhatsApp phone: ' + lead.whatsapp].join('\n')
+    return route.fulfill({ json: { whatsapp: 'https://wa.me/201007372106?text=' + encodeURIComponent(text),
+      email: 'mailto:eiabdgaming@gmail.com' } })
+  })
   await page.route('https://wa.me/201007372106?**', (route) => route.fulfill({ body: 'WhatsApp draft test' }))
-  const [handoff] = await Promise.all([page.waitForRequest('https://wa.me/201007372106?**'), submit.click()])
+  await submit.click()
+  await form.getByText(/Inquiry saved/).waitFor()
+  const [handoff] = await Promise.all([page.waitForRequest('https://wa.me/201007372106?**'),
+    form.getByRole('link', { name: /Continue on WhatsApp/ }).click()])
   const draft = new URL(handoff.url())
   assert.equal(handoff.method(), 'GET')
   assert.equal(draft.pathname, '/201007372106')
   assert.deepEqual([...draft.searchParams.keys()], ['text'])
   assert.match(draft.searchParams.get('text'), /Name: Local Test\nProject type: Reels & Shorts\nService: Video Editing\nProject brief: أهلاً & an edit\?\nSecond line\.\nBudget: 500 USD\nDeadline: Next month\nEmail: test@example\.invalid\nWhatsApp phone: \+12025550123/)
-  assert.deepEqual(posts, [])
+  assert.deepEqual(posts, [url('/api/contact')])
 })
 
 test('compact reel navigation responds to touch swipes and keyboard without starting a video', async (t) => {
