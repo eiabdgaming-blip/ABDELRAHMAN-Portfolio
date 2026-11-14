@@ -19,7 +19,7 @@ export async function signUpload(input: { name: string; size: number; mime: stri
   }
 }
 
-export async function saveUpload(token: string): Promise<{ saved: true } | { error: string }> {
+export async function saveUpload(token: string): Promise<{ saved: true; id: string } | { error: string }> {
   const { user } = await requireAdmin({ writable: true })
   const cloud = cloudinaryConfig()
   const writer = mediaWriter()
@@ -47,7 +47,7 @@ export async function saveUpload(token: string): Promise<{ saved: true } | { err
     const { error } = await writer.from('media_assets').upsert({
       ...asset, owner_id: user.id, status: 'draft',
     }, { onConflict: 'id', ignoreDuplicates: true })
-    if (!error) return { saved: true }
+    if (!error) return { saved: true, id: asset.id }
   } catch {
     // The same ticket can retry the insert without creating another Cloudinary asset.
   }

@@ -1,6 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { profileFields, profileKeys, profilePattern, publicPlayerItem, type PublicFeedback } from '../domain/portfolio-cms'
+import { FeedbackVoice } from './feedback-voice'
+import { FeedbackQuote } from './feedback-quote'
+import { ProfileIcon } from './profile-icon'
 import { reviewMedia } from '../domain/display'
 import { projectTypes } from '../domain/editorial'
 import type { Question, Service, SiteContact } from '../domain/site-content'
@@ -198,15 +203,66 @@ const examples = [
 ] as const
 type Filter = 'All' | 'Featured' | 'With review' | 'With proof'
 
-export function Feedback({ review }: { review: boolean }) {
+function Testimonial({ entry }: { entry: PublicFeedback }) {
+  const { showProof, showVideo } = useMediaExperience()
+  const profiles = profileKeys.flatMap((key) => {
+    const network = profileFields[key]
+    const host = network.toLowerCase() + '.com'
+    const href = [entry[key], entry.profile_url].find((value) => value && profilePattern.test(value) &&
+      new URL(value).hostname.replace(/^www\./, '') === host)
+    return href ? [{ network, href }] : []
+  })
+  const [primary, ...secondary] = profiles
+  const badge = ({ network, href }: typeof profiles[number], overlap = false) =>
+    <a key={network} className="feedback-social" data-platform={network} data-primary={overlap || undefined}
+      href={href} target="_blank" rel="noopener noreferrer" aria-label={`${entry.client_name} on ${network}`}>
+      <ProfileIcon platform={network} />
+    </a>
+  return <article className="feedback-card feedback-testimonial">
+    <header>
+      <div className="feedback-avatar-wrap">
+        {entry.avatar ? <img className="feedback-avatar" src={entry.avatar} alt="" width={44} height={44} loading="lazy" />
+          : <span className="feedback-avatar mono" aria-hidden="true">{Array.from(entry.client_name)[0]}</span>}
+        {primary && badge(primary, true)}
+      </div>
+      <div className="feedback-identity">
+        <h3 dir="auto">{entry.client_name}</h3>
+        {entry.affiliation && <p dir="auto">{entry.affiliation}</p>}
+        {!!secondary.length && <div className="feedback-profiles">{secondary.map((profile) => badge(profile))}</div>}
+      </div>
+    </header>
+    <FeedbackQuote text={entry.quote} />
+    {!!entry.services.length && <div className="feedback-tags">{entry.services.map((tag, index) => <span className="feedback-tag" key={index}>{tag}</span>)}</div>}
+    {entry.proof && (
+      <button type="button" className="proof-image" aria-label="View approved chat screenshot" onClick={(event) =>
+        showProof('Approved chat screenshot', <img className="proof-image-expanded" src={entry.proof!} alt="Approved chat screenshot" />, event.currentTarget)}>
+        <img src={entry.proof} alt="Approved chat screenshot" loading="lazy" />
+      </button>
+    )}
+    {!!entry.voice_duration && <FeedbackVoice key={entry.id} id={entry.id} duration={entry.voice_duration} />}
+    {entry.work_title && entry.work_poster && <div className="feedback-work">
+      {entry.work_slug ? <Link className="feedback-work-link" href={'/work/' + entry.work_slug}>
+        <img src={entry.work_poster} alt="" loading="lazy" /><strong>{entry.work_title} ↗</strong>
+      </Link> : entry.work_video ? <button type="button" className="feedback-work-link" onClick={(event) =>
+        showVideo([publicPlayerItem(entry.work_video!, entry.work_title!, entry.work_poster!)], 0, event.currentTarget)}>
+        <img src={entry.work_poster} alt="" loading="lazy" /><strong><PlayIcon />{entry.work_title}</strong>
+      </button> : <><img src={entry.work_poster} alt="" loading="lazy" /><strong>{entry.work_title}</strong></>}
+    </div>}
+  </article>
+}
+
+export function Feedback({ review, entries }: { review: boolean; entries: PublicFeedback[] }) {
   const [filter, setFilter] = useState<Filter>('All')
   const [sort, setSort] = useState('newest')
   const { showProof, claimAudio } = useMediaExperience()
   const [playing, setPlaying] = useState(false)
+  const fixtures = review && !entries.length
   const tone = useRef<{ stop: () => void }>(undefined)
   useEffect(() => () => tone.current?.stop(), [])
   const visible = examples.filter(({ featured, id }) => filter === 'All' || (filter === 'Featured' && featured)
     || (filter === 'With proof' && id !== 'post'))
+  const testimonials = entries.filter((entry) => filter === 'All' || filter === 'With review' ||
+    (filter === 'Featured' && entry.featured) || (filter === 'With proof' && !!(entry.proof || entry.voice_duration)))
   if (sort === 'oldest') visible.reverse()
 
   async function playSample() {
@@ -237,13 +293,13 @@ export function Feedback({ review }: { review: boolean }) {
   }
 
   return (
-    <section id="feedback" className="feedback container" tabIndex={-1} aria-labelledby="feedback-heading" data-empty={!review}>
+    <section id="feedback" className="feedback container" tabIndex={-1} aria-labelledby="feedback-heading" data-empty={!fixtures && !entries.length}>
       <div className="section-intro">
         <span className="eyebrow">Clients &amp; collaborations</span>
         <h2 className="metallic-heading" id="feedback-heading">CLIENT FEEDBACK</h2>
         <p className="section-copy">Feedback, project context and original posts.</p>
       </div>
-      {review && <>
+      {(fixtures || entries.length > 0) && <>
       <div className="feedback-controls">
         <div aria-label="Feedback filters">
           {(['All', 'Featured', 'With review', 'With proof'] as const).map((choice) =>
@@ -252,12 +308,13 @@ export function Feedback({ review }: { review: boolean }) {
               setFilter(choice)
             }}>{choice}</button>)}
         </div>
-        <select className="glass" aria-label="Sort feedback" value={sort} onChange={(event) => setSort(event.target.value)}>
+        {fixtures && <select className="glass" aria-label="Sort feedback" value={sort} onChange={(event) => setSort(event.target.value)}>
           <option value="newest">Newest</option><option value="oldest">Oldest</option>
-        </select>
+        </select>}
       </div>
-      <div className="feedback-grid">
-        {visible.map(({ id, type, summary }) => (
+      <div className={fixtures ? 'feedback-grid' : 'feedback-wall'}>
+        {testimonials.map((entry) => <Testimonial key={entry.id} entry={entry} />)}
+        {fixtures && visible.map(({ id, type, summary }) => (
           <article className="feedback-card" key={id}>
             <header><span className="feedback-avatar mono" aria-hidden="true">Photo</span>
               <div><h3>Client name</h3><p>Role / collaboration</p></div></header>
@@ -281,7 +338,7 @@ export function Feedback({ review }: { review: boolean }) {
         ))}
       </div>
       </>}
-      {(!review || !visible.length) && <p className="empty-state" role="status">No approved client reviews are available.</p>}
+      {!(fixtures ? visible.length : testimonials.length) && <p className="empty-state" role="status">No approved client reviews are available.</p>}
     </section>
   )
 }

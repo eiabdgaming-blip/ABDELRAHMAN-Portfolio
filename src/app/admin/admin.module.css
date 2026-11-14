@@ -43,3 +43,15 @@
 }
 .deleteQuestion { margin-top: 12px; }
 .deleteQuestion form { display: grid; gap: 8px; justify-items: start; margin-top: 8px; }
+.editor .portfolioCheck { display: flex; align-items: center; }
+.editor .portfolioCheck input { width: auto; }
+.portfolioMedia { display: grid; gap: 8px; justify-items: start; }
+.portfolioMedia p { margin: 0; }
+.portfolioRow { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 85px auto; align-items: end; gap: 8px; }
+.feedbackAttachment { display: grid; gap: 8px; min-width: 0; }
+.feedbackAttachment img { width: auto; max-width: 100%; max-height: 180px; object-fit: contain; }
+.feedbackAttachment audio { max-width: 100%; }
+@media (max-width: 480px) {
+  .portfolioRow { grid-template-columns: minmax(0, 1fr) 70px; }
+  .portfolioRow button { justify-self: start; }
+}

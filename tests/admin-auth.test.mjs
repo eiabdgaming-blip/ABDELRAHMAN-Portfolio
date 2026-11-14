@@ -35,6 +35,19 @@ test('admin auth, media and site content against local provider stubs', async (t
   const copies = new Map()
   const cdn = 'https://res.cloudinary.com/fixture-media'
   let cdnReady = false
+  const projects = new Map()
+  const feedback = new Map()
+  const voices = new Map()
+  const oggBytes = await readFile(new URL('./fixtures/voice-opus.ogg', import.meta.url))
+  const mp3Bytes = await readFile(new URL('./fixtures/voice.mp3', import.meta.url))
+  const voiceBytes = Buffer.alloc(44 + 48000)
+  voiceBytes.write('RIFF'); voiceBytes.writeUInt32LE(voiceBytes.length - 8, 4)
+  voiceBytes.write('WAVEfmt ', 8); voiceBytes.writeUInt32LE(16, 16)
+  voiceBytes.writeUInt16LE(1, 20); voiceBytes.writeUInt16LE(1, 22)
+  voiceBytes.writeUInt32LE(8000, 24); voiceBytes.writeUInt32LE(16000, 28)
+  voiceBytes.writeUInt16LE(2, 32); voiceBytes.writeUInt16LE(16, 34)
+  voiceBytes.write('data', 36); voiceBytes.writeUInt32LE(48000, 40)
+  for (let i = 44; i < voiceBytes.length; i += 2) voiceBytes.writeInt16LE(Math.round(1000 * Math.sin(i / 9)), i)
   const content = {
     site_services: [{ id: 'video-editing', title: 'Video Editing', description: 'Approved fixture copy.', display_order: 10, visible: true }],
     site_faq: [{ id: randomUUID(), question: 'Existing question?', answer: 'Existing answer.', display_order: 10, published: true }],
@@ -67,6 +80,22 @@ test('admin auth, media and site content against local provider stubs', async (t
       return raw
     }
     if (url.pathname.startsWith('/fixture-media/')) {
+      if (/\/abdel-voice-[\da-f-]+\.(wav|ogg|mp3)$/.test(url.pathname)) {
+        const voiceFile = url.pathname.split('/').at(-1)
+        const derivative = url.pathname.includes('/br_64k/')
+        const suffix = voiceFile.slice(-3)
+        const data = suffix === 'wav' ? voiceBytes : suffix === 'ogg' ? oggBytes : mp3Bytes
+        const signature = createHash('sha256').update((derivative ? 'br_64k/' : '') + voiceFile + cloudSecret).digest('base64url').slice(0, 8)
+        if (!url.pathname.includes('/authenticated/s--' + signature + '--/') || !uploads.has(voiceFile.slice(0, -4))) return send(401, {})
+        const match = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? '')
+        const start = Number(match?.[1] ?? 0)
+        if (start >= data.length) return res.writeHead(416, { 'content-range': `bytes */${data.length}` }).end()
+        const end = Math.min(Number(match?.[2] || data.length - 1), data.length - 1)
+        const headers = { 'content-type': suffix === 'mp3' ? 'audio/mpeg' : 'audio/' + suffix,
+          'accept-ranges': 'bytes', 'content-length': end - start + 1 }
+        if (match) headers['content-range'] = `bytes ${start}-${end}/${data.length}`
+        return res.writeHead(match ? 206 : 200, headers).end(data.subarray(start, end + 1))
+      }
       const copy = copies.get(url.pathname.split('/').at(-1).split('.')[0])
       if (!copy || !cdnReady) return send(404, {})
       if (url.pathname.endsWith('.mp4')) {
@@ -86,6 +115,14 @@ test('admin auth, media and site content against local provider stubs', async (t
         assert.equal(parameters.type, 'authenticated')
         assert.equal(api_key, cloudKey)
         assert.equal(signature, digest(parameters))
+        if (form.get('public_id').startsWith('abdel-feedback-')) {
+          assert.equal(form.get('type'), 'upload')
+          assert.match(form.get('transformation'), /fl_force_strip/)
+          const output = { public_id: form.get('public_id'), resource_type: 'image',
+            type: 'upload', format: 'webp', width: 160, height: 160, version: 1 }
+          copies.set(output.public_id, output)
+          return send(200, output)
+        }
         assert.equal(form.get('async'), 'true')
         assert.equal(form.get('eager_async'), 'true')
         assert.equal(form.get('overwrite'), 'false')
@@ -142,8 +179,82 @@ test('admin auth, media and site content against local provider stubs', async (t
       asset.publication_revision++
       return send(200, 'saved')
     }
+    if (url.pathname.endsWith('/rest/v1/portfolio_voice_notes')) {
+      if (req.method === 'POST' && req.headers.apikey === writerKey && membership === 'active') {
+        const note = JSON.parse(await body())
+        voices.set(note.id, note)
+        return send(201, {})
+      }
+      if (user?.id !== owner.id || membership !== 'active') return send(403, {})
+      const id = url.searchParams.get('id')?.slice(3)
+      return send(200, [...voices.values()].filter((row) => !id || row.id === id))
+    }
+    if (url.pathname.endsWith('/rest/v1/portfolio_feedback') && req.headers.apikey === writerKey) {
+      const entry = feedback.get(url.searchParams.get('id')?.slice(3))
+      return send(200, entry?.status === 'published' && entry.voice_approved ? [{ voice: voices.get(entry.voice_id) }] : [])
+    }
+    if (/\/rpc\/(save_portfolio_entry|save_feedback_attachments)$/.test(url.pathname)) {
+      const { p_actor, p_kind = 'feedback', p_id, p_revision, p_payload } = JSON.parse(await body())
+      if (req.headers.apikey !== writerKey || p_actor !== owner.id || membership !== 'active') return send(403, {})
+      const entries = p_kind === 'project' ? projects : feedback
+      if (p_id && entries.get(p_id)?.revision !== p_revision) return send(200, null)
+      if (p_kind === 'delete-feedback') {
+        entries.delete(p_id)
+        return send(200, p_id)
+      }
+      const id = p_id ?? randomUUID()
+      const row = { ...p_payload, id, revision: p_id ? p_revision + 1 : 0 }
+      if (p_kind === 'project') {
+        row.portfolio_project_media = row.media.map(({ id: asset_id, order: display_order }) => ({ asset_id, display_order }))
+        row.portfolio_case_studies = row.study
+      } else row.portfolio_feedback_services = row.services.map((service_id) => ({ service_id }))
+      entries.set(id, row)
+      return send(200, id)
+    }
     if (req.headers.apikey !== publicKey) return send(401, {})
     const table = url.pathname.split('/').at(-1)
+    if (table === 'portfolio_projects' || table === 'portfolio_feedback') {
+      if (user?.id !== owner.id || membership !== 'active') return send(200, [])
+      return send(200, [...(table === 'portfolio_projects' ? projects : feedback).values()])
+    }
+    if (table.startsWith('portfolio_public_')) {
+      const publicAsset = (id) => {
+        const row = drafts.get(id)
+        if (!row || row.status !== 'published') return null
+        const delivery = row.public_delivery
+        return { id, title: row.title, kind: row.resource_type, url: delivery.url, poster: delivery.poster,
+          small_poster: delivery.poster_small, width: delivery.width, height: delivery.height, duration: row.duration }
+      }
+      const publicProjects = [...projects.values()].filter(({ status }) => status === 'published').flatMap((row) => {
+        const media = row.media.slice().sort((a, b) => a.order - b.order).map(({ id }) => publicAsset(id)).filter(Boolean)
+        const cover = publicAsset(row.cover_id) ?? media[0]
+        return !cover ? [] : [{ ...row, media, lead: media.find(({ kind }) => kind === 'video') ?? null,
+          poster_url: cover.poster, poster_small_url: cover.small_poster }]
+      })
+      if (table === 'portfolio_public_feedback') return send(200, [...feedback.values()]
+        .filter(({ status }) => status === 'published').map((entry) => {
+          const project = publicProjects.find(({ id }) => id === entry.project_id)
+          return { ...entry, avatar: entry.attachment_public?.avatar ?? publicAsset(entry.avatar_id)?.small_poster,
+            proof: entry.proof_approved ? entry.attachment_public?.proof ?? publicAsset(entry.proof_id)?.poster : null,
+            voice_duration: entry.voice_approved ? voices.get(entry.voice_id)?.duration : null,
+            services: entry.services.map((id) => content.site_services.find((row) => row.id === id && row.visible)?.title).filter(Boolean),
+            work_title: project?.title, work_poster: project?.poster_url, work_slug: project?.slug }
+        }))
+      if (table === 'portfolio_public_case_studies') return send(200, publicProjects
+        .filter((row) => row.presentation === 'case-study' && row.slug === url.searchParams.get('slug')?.slice(3))
+        .map((row) => ({ ...row, ...row.study })))
+      if (table === 'portfolio_public_projects') return send(200, publicProjects
+        .filter(({ featured }) => !url.searchParams.has('featured') || featured))
+      // Preserve the earlier provider fixture for the Phase 03.2B regression checks.
+      if (!projects.size) return send(404, { code: 'PGRST205' })
+      const attached = new Set(publicProjects.flatMap(({ media }) => media.map(({ id }) => id)))
+      const standalone = [...drafts.values()].filter((row) => row.resource_type === 'video' &&
+        row.status === 'published' && row.placement !== 'home' && !attached.has(row.id)).map((row) => {
+        const lead = publicAsset(row.id)
+        return { ...row, slug: null, media: [], lead, poster_url: lead.poster, poster_small_url: lead.small_poster }
+      })
+      return send(200, [...publicProjects, ...standalone].filter((row) => row.project_format === url.searchParams.get('project_format')?.slice(3)))
+    }
     if (Object.hasOwn(content, table)) {
       const active = user?.id === owner.id && membership === 'active'
       const rows = content[table]
@@ -187,7 +298,7 @@ test('admin auth, media and site content against local provider stubs', async (t
       const id = url.searchParams.get('id')?.slice(3)
       const images = url.searchParams.get('resource_type') === 'eq.image'
       const rows = [...drafts.values()].filter((draft) =>
-        (!id || draft.id === id) && (!images || (draft.resource_type === 'image' && draft.status === 'published')) &&
+        (!id || draft.id === id) && (!images || draft.resource_type === 'image') &&
         (!url.searchParams.has('status') || url.searchParams.get('status') === 'eq.' + draft.status) &&
         (!url.searchParams.has('featured') || draft.featured))
       if (req.method === 'HEAD') return res.writeHead(200, { 'content-range': `0-${Math.max(0, rows.length - 1)}/${rows.length}` }).end()
@@ -651,6 +762,250 @@ test('admin auth, media and site content against local provider stubs', async (t
     } finally {
       await homepage.close()
     }
+  })
+
+  await t.test('publishes project case studies and owner-approved feedback using prepared media', async () => {
+    const [video] = [...drafts.values()].filter(({ resource_type }) => resource_type === 'video')
+    const [image] = [...drafts.values()].filter(({ resource_type }) => resource_type === 'image')
+    video.status = 'published'
+    const home = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await home.route(cdn + '/**', (route) => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="36"/>' }))
+      await page.goto(admin + '/projects')
+      await page.getByText('New project', { exact: true }).click()
+      const project = page.getByRole('form', { name: 'New project' })
+      await project.getByLabel('Title').fill('Test case study')
+      await project.getByLabel('Slug').fill('test-case-study')
+      await project.getByLabel('Open as').selectOption('case-study')
+      await project.getByLabel('Cover or poster').selectOption(image.id)
+      await project.getByText('Case Study text').click()
+      await project.getByLabel('Project overview').fill('An owner-provided project overview.')
+      await project.getByRole('button', { name: 'Add media' }).click()
+      await project.getByRole('button', { name: 'Add media' }).click()
+      await project.getByLabel('Asset 1').selectOption(video.id)
+      await project.getByLabel('Asset 2').selectOption(image.id)
+      await project.locator('[name="media_order"]').nth(0).fill('20')
+      await project.getByLabel('Featured on Home').check()
+      await project.getByRole('button', { name: 'Create entry' }).click()
+      await project.getByRole('status').waitFor()
+      assert.equal((await home.goto(server.origin + '/work/test-case-study')).status(), 404)
+      const entry = page.locator('li').filter({ hasText: 'Test case study' })
+      await entry.locator('summary').filter({ hasText: 'Test case study' }).click()
+      const edit = entry.getByRole('form')
+      await edit.getByLabel('Status').selectOption('published')
+      await edit.getByRole('button', { name: 'Save changes' }).click()
+      await edit.getByRole('status').waitFor()
+      await home.goto(server.origin)
+      await home.getByRole('region', { name: 'SELECTED WORK' }).getByRole('link', { name: 'Open Test case study' }).click()
+      await home.getByRole('heading', { name: 'Project overview' }).waitFor()
+      assert.equal(await home.locator('.portfolio-gallery > div').first().locator('video').count(), 0)
+      await home.goto(server.origin + '/work?format=long-form')
+      assert.equal(await home.getByRole('link', { name: 'Open Test case study' }).count(), 1)
+      assert.equal(await home.getByRole('button', { name: 'Open Published test Reel' }).count(), 0)
+      await edit.locator('[name="media_order"]').nth(1).fill('0')
+      await edit.getByRole('button', { name: 'Save changes' }).click()
+      await edit.getByRole('status').waitFor()
+      await home.goto(server.origin + '/work/test-case-study')
+      assert.equal(await home.locator('.portfolio-gallery > div').first().locator('video').count(), 1)
+
+      await page.goto(admin + '/feedback')
+      await page.getByText('New testimonial', { exact: true }).click()
+      const testimonial = page.getByRole('form', { name: 'New testimonial' })
+      await testimonial.getByLabel('Client name').fill('Browser test client')
+      const longQuote = 'A browser fixture testimonial with detailed notes on the editing process and final delivery. '.repeat(13).trim()
+      await testimonial.getByLabel('Testimonial').fill(longQuote)
+      await testimonial.getByLabel('Redacted chat screenshot').selectOption(image.id)
+      await testimonial.getByRole('img', { name: 'Redacted chat screenshot preview' }).waitFor()
+      const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jkXcAAAAASUVORK5CYII=', 'base64')
+      await page.unroute(cloudApi + '/**')
+      await page.route(cloudApi + '/**', async (route) => {
+        const cors = { 'access-control-allow-origin': server.origin, 'access-control-allow-methods': 'POST, OPTIONS' }
+        if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors })
+        if (!route.request().url().endsWith('/upload')) return route.abort()
+        const form = await new Response(route.request().postDataBuffer(), { headers: { 'content-type': route.request().headers()['content-type'] } }).formData()
+        const { signature, api_key, file, ...fields } = Object.fromEntries(form)
+        assert.equal(signature, digest(fields))
+        assert.equal(fields.type, 'authenticated')
+        const extension = file.name.split('.').at(-1)
+        const audio = ['wav', 'mp3', 'ogg'].includes(extension)
+        if (audio) {
+          if (extension === 'ogg') assert.equal(fields.eager, 'br_64k/mp3')
+          else assert.equal(fields.transformation, 'fl_force_strip')
+          assert.deepEqual(Buffer.from(await file.arrayBuffer()), extension === 'wav' ? voiceBytes : extension === 'ogg' ? oggBytes : mp3Bytes)
+        }
+        uploads.set(fields.public_id, { public_id: fields.public_id, asset_id: randomUUID().replaceAll('-', ''),
+          format: extension === 'ogg' ? 'opus' : fields.allowed_formats, resource_type: audio ? 'video' : 'image', type: 'authenticated', bytes: file.size,
+          derived: extension === 'ogg' ? [{ transformation: 'br_64k/mp3', format: 'mp3' }] : undefined,
+          width: audio ? 0 : 1, height: audio ? 0 : 1, duration: audio ? 3 : undefined,
+          version: +fields.timestamp, created_at: new Date().toISOString() })
+        return route.fulfill({ headers: cors, json: {} })
+      })
+      await testimonial.getByLabel('Upload client photo').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: png })
+      await testimonial.getByRole('img', { name: 'Client photo preview' }).waitFor()
+      await testimonial.getByRole('option', { name: 'photo.png · draft' }).waitFor({ state: 'attached' })
+      await testimonial.getByRole('button', { name: 'Remove client photo' }).click()
+      assert.equal(await testimonial.getByLabel('Client photo', { exact: true }).inputValue(), '')
+      const photoId = [...drafts.values()].find(({ title }) => title === 'photo.png').id
+      await testimonial.getByLabel('Client photo', { exact: true }).selectOption(photoId)
+      await testimonial.getByLabel('Upload chat screenshot').setInputFiles({ name: 'redacted.png', mimeType: 'image/png', buffer: png })
+      await testimonial.getByRole('option', { name: 'redacted.png · draft' }).waitFor({ state: 'attached' })
+      const voiceInput = testimonial.getByLabel('Upload voice note (MP3, WAV or OGG)')
+      await voiceInput.setInputFiles({ name: 'disguised.ogg', mimeType: 'audio/ogg', buffer: png })
+      await testimonial.getByText('This file is not a supported audio recording.', { exact: false }).waitFor()
+      assert.equal(voices.size, 0)
+      for (const [format, mimeType, buffer] of [['wav', 'audio/wav', voiceBytes], ['mp3', 'audio/mpeg', mp3Bytes], ['ogg', 'application/ogg', oggBytes]]) {
+        await voiceInput.setInputFiles({ name: 'note.' + format, mimeType, buffer })
+        await testimonial.getByRole('option', { name: 'note.' + format + ' · draft' }).waitFor({ state: 'attached' })
+      }
+      const recording = [...voices.values()].find(({ format }) => format === 'ogg')
+      await testimonial.getByText('Recording ready · 0:03').waitFor()
+      assert.equal((await home.request.get(server.origin + '/api/feedback/voice/' + recording.id)).status(), 404)
+      await testimonial.getByLabel('Instagram profile').fill('https://www.instagram.com/example.test/')
+      await testimonial.getByLabel('TikTok profile').fill('https://www.tiktok.com/@example.test')
+      await testimonial.getByLabel('LinkedIn profile').fill('https://www.linkedin.com/in/example-test/')
+      await testimonial.getByLabel('Published project reference').selectOption([...projects.keys()][0])
+      await testimonial.getByLabel('Video Editing').check()
+      await testimonial.getByLabel('Status').selectOption('published')
+      await testimonial.getByRole('button', { name: 'Create entry' }).click()
+      await testimonial.getByRole('alert').waitFor()
+      assert.equal(feedback.size, 0)
+      await testimonial.getByLabel('I approve this redacted screenshot').check()
+      await testimonial.getByRole('button', { name: 'Create entry' }).click()
+      await testimonial.getByText('Approve the recording before publishing.').waitFor()
+      assert.equal(feedback.size, 0)
+      await testimonial.getByLabel('I approve this recording').check()
+      await testimonial.getByRole('button', { name: 'Create entry' }).click()
+      await testimonial.getByText('Changes saved.', { exact: true }).waitFor().catch(async (error) => {
+        throw new Error((await testimonial.getByRole('alert').allTextContents()).join(' ') || error.message)
+      })
+      // Exercise a stored duration that disagrees with the browser's MP3 metadata.
+      recording.duration = 269
+      const extraCards = [
+        { client_name: 'Arabic fixture', quote: 'تقييم تجريبي من أجل اختبار تخطيط بطاقة العميل. '.repeat(16).trim(), tiktok_url: 'https://www.tiktok.com/@fixture', instagram_url: 'https://instagram.com.invalid/fixture' },
+        { client_name: 'LinkedIn fixture', quote: 'Short quote.', linkedin_url: 'https://www.linkedin.com/in/fixture/' },
+        { client_name: 'No profile fixture', quote: 'A second, somewhat longer English quote that allows the wall to display different heights.' },
+      ].map((values) => ({ id: randomUUID(), affiliation: '', status: 'published', services: [], ...values }))
+      for (const item of extraCards) feedback.set(item.id, item)
+      await home.goto(server.origin + '/#feedback')
+      const card = home.locator('.feedback-card').filter({ hasText: 'Browser test client' })
+      await card.locator('blockquote').waitFor()
+      await card.getByText('Video Editing', { exact: true }).waitFor()
+      assert.equal(await card.locator('header a svg').count(), 3)
+      const arabic = home.locator('.feedback-card').filter({ hasText: 'Arabic fixture' })
+      const linkedin = home.locator('.feedback-card').filter({ hasText: 'LinkedIn fixture' })
+      assert.equal(await arabic.locator('header a').count(), 1)
+      assert.equal(await arabic.locator('[data-primary]').getAttribute('data-platform'), 'TikTok')
+      assert.equal(await linkedin.locator('[data-primary]').getAttribute('data-platform'), 'LinkedIn')
+      assert.equal(await home.locator('.feedback-card').filter({ hasText: 'No profile fixture' }).locator('header a').count(), 0)
+      assert.equal(await arabic.locator('blockquote p').evaluate((node) => getComputedStyle(node).direction), 'rtl')
+      assert.equal(await card.locator('blockquote p').evaluate((node) => getComputedStyle(node).direction), 'ltr')
+      const proofImage = card.locator('.proof-image img')
+      await proofImage.scrollIntoViewIfNeeded()
+      await home.waitForFunction(() => document.querySelector('.proof-image img')?.naturalWidth > 0)
+      for (const [width, columns] of [[1440, 3], [768, 2], [390, 1]]) {
+        await home.setViewportSize({ width, height: 900 })
+        assert.equal(await home.locator('.feedback-wall').evaluate((node) => +getComputedStyle(node).columnCount), columns)
+        assert.equal(await card.evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(253, 253, 254)')
+        assert.deepEqual(await home.locator('.feedback-card h3').allTextContents(), ['Browser test client', ...extraCards.map(({ client_name }) => client_name)])
+        const [photo, badge] = await Promise.all([card.locator('.feedback-avatar').boundingBox(), card.locator('[data-primary]').boundingBox()])
+        assert.ok(badge.x > photo.x + photo.width / 2 && badge.x < photo.x + photo.width)
+        assert.ok(badge.y > photo.y + photo.height / 2 && badge.y < photo.y + photo.height)
+        assert.ok(badge.x + badge.width > photo.x + photo.width && badge.y + badge.height > photo.y + photo.height)
+        assert.ok(await proofImage.evaluate((node) => Math.abs(node.width / node.height - node.naturalWidth / node.naturalHeight) < 0.025))
+        assert.equal(await card.locator('.proof-image').evaluate((node) => getComputedStyle(node).borderTopWidth), '0px')
+        assert.ok(await home.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        const more = card.getByRole('button', { name: 'See more' })
+        await more.waitFor()
+        assert.equal(await more.getAttribute('aria-expanded'), 'false')
+        const quote = card.locator('blockquote p')
+        const collapsed = await quote.evaluate((node) => node.offsetHeight)
+        assert.ok(await quote.evaluate((node) => Math.abs(node.offsetHeight / parseFloat(getComputedStyle(node).lineHeight) - 5) < 0.1))
+        await more.press('Enter')
+        const less = card.getByRole('button', { name: 'See less' })
+        assert.equal(await less.getAttribute('aria-expanded'), 'true')
+        assert.ok(await quote.evaluate((node) => node.offsetHeight) > collapsed)
+        assert.equal(await quote.textContent(), longQuote)
+        assert.equal(await card.locator('audio').count(), 1)
+        assert.ok(await proofImage.isVisible())
+        await less.click()
+        assert.equal(await quote.evaluate((node) => node.offsetHeight), collapsed)
+        assert.equal(await linkedin.getByRole('button', { name: 'See more' }).count(), 0)
+      }
+      await arabic.getByRole('button', { name: 'See more' }).click()
+      assert.equal(await arabic.locator('blockquote p').textContent(), extraCards[0].quote)
+      await arabic.getByRole('button', { name: 'See less' }).click()
+      assert.equal(await card.getByRole('link', { name: 'Browser test client on LinkedIn' }).getAttribute('rel'), 'noopener noreferrer')
+      assert.match(await card.locator('img.feedback-avatar').getAttribute('src'), /abdel-feedback-/)
+      const audio = card.locator('audio')
+      assert.equal(await audio.getAttribute('preload'), 'none')
+      assert.equal(await audio.getAttribute('autoplay'), null)
+      assert.equal(await audio.getAttribute('controls'), null)
+      assert.equal(await card.locator('[data-voice-duration]').textContent(), '4:29')
+      const voiceUrl = server.origin + await audio.getAttribute('src')
+      const range = await home.request.get(voiceUrl, { headers: { Range: 'bytes=0-47' } })
+      assert.equal(range.status(), 206)
+      assert.equal(range.headers()['content-type'], 'audio/mpeg')
+      // Next's Node route adapter strips Content-Length on streamed Responses.
+      if (range.headers()['content-length']) assert.equal(range.headers()['content-length'], '48')
+      assert.equal(range.headers()['accept-ranges'], 'bytes')
+      assert.match(range.headers()['content-range'], /^bytes 0-47\//)
+      assert.equal((await range.body()).length, 48)
+      assert.equal((await home.request.get(voiceUrl, { headers: { Range: 'bytes=0-1,4-5' } })).status(), 416)
+      assert.equal((await home.request.get(voiceUrl, { headers: { Range: 'bytes=900000-' } })).status(), 416)
+      await home.route(voiceUrl, async (route) => {
+        await card.getByText('Loading recording…').waitFor({ state: 'attached' })
+        await route.continue()
+      }, { times: 1 })
+      await card.getByRole('button', { name: 'Play voice note' }).click()
+      await home.waitForFunction(() => document.querySelector('.feedback-voice audio')?.currentTime > 0.2)
+      assert.equal(await card.locator('[data-voice-duration]').textContent(), '0:03')
+      await card.getByRole('button', { name: 'Pause voice note' }).click()
+      assert.ok(await audio.evaluate((node) => node.paused))
+      const timeline = card.getByRole('slider', { name: 'Seek voice note' })
+      await timeline.press('End')
+      await timeline.press('ArrowLeft')
+      assert.ok(await audio.evaluate((node) => node.currentTime >= 2.8))
+      await card.getByRole('button', { name: 'Play voice note' }).click()
+      await card.getByRole('button', { name: 'Replay voice note' }).waitFor()
+      await card.getByRole('button', { name: 'Replay voice note' }).click()
+      assert.ok(await audio.evaluate((node) => node.currentTime < 1))
+      await home.route(voiceUrl, (route) => route.fulfill({ status: 502 }))
+      await home.reload()
+      await card.getByRole('button', { name: 'Play voice note' }).click()
+      await card.getByRole('button', { name: 'Retry voice note' }).waitFor()
+      await card.getByText('Recording unavailable.', { exact: false }).waitFor()
+      await home.unroute(voiceUrl)
+      for (const item of extraCards) feedback.delete(item.id)
+      await card.getByRole('button', { name: 'View approved chat screenshot' }).click()
+      await home.getByRole('dialog').getByRole('img', { name: 'Approved chat screenshot' }).waitFor()
+      await home.getByRole('button', { name: 'Close', exact: true }).click()
+      await home.getByRole('dialog').waitFor({ state: 'hidden' })
+      assert.ok(await home.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      assert.doesNotMatch(await card.innerHTML(), /\/authenticated\//)
+      const row = page.locator('li').filter({ hasText: 'Browser test client' })
+      await row.locator('summary').click()
+      const editReview = row.getByRole('form')
+      await editReview.getByLabel('Status').selectOption('hidden')
+      await editReview.getByRole('button', { name: 'Save changes' }).click()
+      await editReview.getByText('Changes saved.', { exact: true }).waitFor()
+      await home.reload()
+      assert.equal(await card.count(), 0)
+      assert.equal((await home.request.get(voiceUrl)).status(), 404)
+      page.once('dialog', (dialog) => dialog.accept())
+      await editReview.getByRole('button', { name: 'Delete testimonial' }).click()
+      await row.waitFor({ state: 'detached' })
+      assert.equal(feedback.size, 0)
+      await page.goto(admin + '/projects')
+      await entry.locator('summary').filter({ hasText: 'Test case study' }).click()
+      membership = 'disabled'
+      await edit.getByLabel('Status').selectOption('hidden')
+      await edit.getByRole('button', { name: 'Save changes' }).click()
+      await assertDenied('?error=denied')
+      assert.equal([...projects.values()][0].status, 'published')
+      membership = 'active'
+      await submit(owner)
+      await dashboard.waitFor()
+    } finally { await home.close() }
   })
 
   // Seed a session issued by the local fixture whose access token needs refreshing.

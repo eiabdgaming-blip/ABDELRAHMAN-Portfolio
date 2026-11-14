@@ -29,6 +29,8 @@ export default async function AdminPage() {
       <p>Signed in as {user.email ?? 'owner'}.</p>
       <nav aria-label="Admin sections" className={styles.controls}>
         <Link className="glass" href="/admin/media">Media Library</Link>
+        <Link className="glass" href="/admin/projects">Projects</Link>
+        <Link className="glass" href="/admin/feedback">Client Feedback</Link>
         <Link className="glass" href="/admin/content/services">Services</Link>
         <Link className="glass" href="/admin/content/faq">FAQ</Link>
         <Link className="glass" href="/admin/content/settings">Site Settings</Link>
