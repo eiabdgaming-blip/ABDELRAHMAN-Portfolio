@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
+import { createServer, get } from 'node:http'
 import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -1129,12 +1129,38 @@ test('admin auth, media and site content against local provider stubs', async (t
 
   // Seed a session issued by the local fixture whose access token needs refreshing.
   const expired = { ...session(owner, -600), expires_at: Math.floor(Date.now() / 1000) - 600 }
+  const expiredValue = 'base64-' + Buffer.from(JSON.stringify(expired)).toString('base64url')
   await page.context().addCookies([{ name: cookieName, domain: '127.0.0.1', path: '/admin', httpOnly: true,
-    value: 'base64-' + Buffer.from(JSON.stringify(expired)).toString('base64url') }])
+    value: expiredValue }])
   await page.reload()
   await dashboard.waitFor()
   assert.equal(refreshes, 1)
   assert.notEqual((await cookie()).value, authenticated.value)
+  assert.equal((await cookie()).secure, false)
+
+  await t.test('Admin responses prevent framing and refresh cookies stay Secure beyond loopback', async () => {
+    const login = await fetch(admin + '/login')
+    assert.equal(login.status, 200)
+    assert.equal(login.headers.get('x-frame-options'), 'DENY')
+    assert.match(login.headers.get('content-security-policy'), /frame-ancestors 'none'/)
+    assert.equal(login.headers.get('referrer-policy'), 'no-referrer')
+    assert.equal(login.headers.get('x-content-type-options'), 'nosniff')
+    const expiring = { ...session(owner, -600), expires_at: expired.expires_at }
+    const value = 'base64-' + Buffer.from(JSON.stringify(expiring)).toString('base64url')
+    const response = await new Promise((resolve, reject) => {
+      get(admin, { headers: { Host: 'portfolio.example.test', Cookie: `${cookieName}=${value}` } }, (res) => {
+        res.resume()
+        resolve(res)
+      }).on('error', reject)
+    })
+    assert.equal(response.statusCode, 200)
+    assert.match(response.headers['cache-control'], /(?:^|,\s*)no-store(?:,|$)/)
+    const refreshed = response.headers['set-cookie']?.find((header) => header.startsWith(cookieName + '='))
+    assert.ok(refreshed, 'Refresh should set the session cookie')
+    for (const attribute of [/; Secure\b/i, /; HttpOnly\b/i, /; SameSite=Lax\b/i, /; Path=\/admin\b/i]) {
+      assert.match(refreshed, attribute)
+    }
+  })
 
   await page.getByRole('button', { name: 'Sign out' }).click()
   await assertDenied('')

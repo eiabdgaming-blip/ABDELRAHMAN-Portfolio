@@ -64,13 +64,42 @@ test('handoff paths, byte sizes and SHA-256 agree with the archive', () => {
   }
 })
 
-test('public assets are the original OFL font files and their notices', () => {
+test('public contains only approved fonts, decorative originals and the tracked Showreel', () => {
   const approvedFonts = assets.filter(
     (asset) => asset.path.startsWith('assets/fonts/') && asset.rights === 'sil_ofl_1_1_with_notices',
   )
   assert.equal(approvedFonts.length, 5)
   const publicPaths = approvedFonts.map(({ path }) => `fonts/${posix.basename(path)}`)
-  assert.deepEqual(relativeFiles(publicRoot), publicPaths.toSorted())
+  const decorations = {
+    'hero-left.mp4': 'assets/media/hero_star_LEFT_as_submitted.mp4',
+    'hero-left-poster.png': 'assets/stills/Glass_Star_Angle_D-2.png',
+    'hero-right.mp4': 'assets/media/hero_star_RIGHT_as_submitted.mp4',
+    'hero-right-poster.png': 'assets/stills/Glass_Star_Angle_B-2.png',
+    'hero-star.mp4': 'assets/media/Glass_Star_Angle_A.mp4',
+    'hero-star-poster.png': 'assets/stills/Glass_Star_Angle_A-2-matte.png',
+    'contact-star.mp4': 'assets/media/contact_star_motion_REFERENCE.mp4',
+    'contact-star-poster.png': 'assets/stills/Glass_Star_Angle_C-2.png',
+    'about-disk.mp4': 'assets/media/Dark_Disk_Motion_Reference.mp4',
+    'about-disk-poster.png': 'assets/stills/Dark_Disk_Motion_Reference-4-matte.png',
+    'glass-cube.png': 'assets/icons/Glass_Cube.png',
+    'glass-moon.png': 'assets/icons/Glass_Moon.png',
+    'glass-cursor.png': 'assets/icons/Glass_Cursor.png',
+  }
+  const showreel = {
+    'videos/showreel.mp4': '8231c33f015586eaffd046079bb54724289da4c102f5d2aff1fb8ee8ffe7afbd',
+    'videos/showreel-poster.png': 'd6cb5847ea7284687ccfff0d0bddd2307ccabec10da4b6d552e7911ac4a59ba8',
+  }
+  assert.deepEqual(relativeFiles(publicRoot), [
+    ...publicPaths, ...Object.keys(decorations).map((name) => 'visuals/' + name), ...Object.keys(showreel),
+  ].sort())
+  for (const [name, original] of Object.entries(decorations)) {
+    const expected = assets.find(({ path }) => path === original)
+    assert.ok(expected, original)
+    assert.equal(sha256(new URL('visuals/' + name, publicRoot)), expected.sha256, name)
+  }
+  for (const [path, hash] of Object.entries(showreel)) {
+    assert.equal(sha256(new URL(path, publicRoot)), hash, path)
+  }
   for (const [index, asset] of approvedFonts.entries()) {
     assert.equal(sha256(new URL(publicPaths[index], publicRoot)), asset.sha256, asset.path)
   }

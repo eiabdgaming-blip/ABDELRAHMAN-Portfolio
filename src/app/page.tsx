@@ -44,13 +44,13 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
           {featured.length ? <ReelRail key={featured.map(({ id }) => id).join(',')} items={featured} initial={1} home /> : <p className="empty-state">No reels are available yet.</p>}
         </section>
         <SelectedProjects projects={portfolio.projects} />
-        <Timeline review={review} />
+        <Timeline />
         <Marquee />
         <Services services={services} />
         <Feedback review={review} entries={portfolio.feedback} />
-        <About review={review} />
+        <About />
         <FAQ questions={questions} />
-        <Contact key={selectedService} review={review} selectedService={selectedService} services={services} contact={contact} />
+        <Contact key={selectedService} selectedService={selectedService} services={services} contact={contact} />
       </main>
       <Footer contact={contact} />
     </>

@@ -1,12 +1,10 @@
 import 'server-only'
 import { cookies, headers } from 'next/headers'
-import { adminCookieOptions, adminSessionCookie, createAdminSessionClient } from './session'
+import { adminCookieOptions, adminCookieSecure, adminSessionCookie, createAdminSessionClient } from './session'
 
 export async function createSupabaseServerClient({ writable = false } = {}) {
   const [store, requestHeaders] = await Promise.all([cookies(), headers()])
-  // The local preview runs on HTTP loopback. HTTPS requests use Secure cookies.
-  const local = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(requestHeaders.get('host') ?? '')
-  const secure = !local || requestHeaders.get('x-forwarded-proto') === 'https'
+  const secure = adminCookieSecure(requestHeaders)
   const supabase = createAdminSessionClient({
     getAll: () => store.getAll(),
     setAll: (updates) => {

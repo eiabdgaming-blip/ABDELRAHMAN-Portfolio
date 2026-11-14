@@ -6,7 +6,7 @@ import { chromium, firefox, webkit } from 'playwright-core'
 import { root, startBuiltServer } from './server.mjs'
 
 let server
-before(async () => { server = await startBuiltServer({ review: true }) })
+before(async () => { server = await startBuiltServer({ env: { NEXT_PUBLIC_SUPABASE_URL: '', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: '' } }) })
 after(async () => { await server?.stop() })
 
 for (const [engine, type, options] of [['Chromium (Edge)', chromium, { channel: 'msedge' }], ['Firefox', firefox, {}], ['WebKit', webkit, {}]]) {
@@ -24,7 +24,7 @@ for (const [engine, type, options] of [['Chromium (Edge)', chromium, { channel: 
     }, null, { timeout: 7000 })
     assert.equal(await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Contact' }).getAttribute('aria-current'), 'location')
     const video = page.locator('.contact-star video')
-    const asset = await page.request.get(server.origin + '/api/review/contact-star')
+    const asset = await page.request.get(server.origin + '/visuals/contact-star.mp4')
     const original = await readFile(new URL('../handoff/assets/media/contact_star_motion_REFERENCE.mp4', root))
     const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
     assert.equal(hash(await asset.body()), hash(original))

@@ -1,6 +1,6 @@
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import { resolve, extname } from 'node:path'
+import { realpath, stat } from 'node:fs/promises'
+import { resolve, extname, relative, isAbsolute } from 'node:path'
 import { Readable } from 'node:stream'
 import { reviewAllowed, reviewFiles } from '../../../../server/review'
 
@@ -8,10 +8,16 @@ const contentTypes = { '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.png': 'image
 
 async function serve(request: Request, context: { params: Promise<{ asset: string }> }) {
   const { asset } = await context.params
-  if (!reviewAllowed(request.headers.get('host')) || request.headers.get('sec-fetch-site') === 'cross-site' ||
+  const site = request.headers.get('sec-fetch-site')
+  if (!reviewAllowed(request.headers.get('host')) || (site && site !== 'same-origin' && site !== 'none') ||
     !Object.hasOwn(reviewFiles, asset)) return new Response(null, { status: 404 })
 
-  const path = resolve(process.cwd(), '..', 'handoff', 'assets', reviewFiles[asset as keyof typeof reviewFiles])
+  const root = await realpath(resolve(process.cwd(), '..', 'handoff', 'assets')).catch(() => null)
+  if (!root) return new Response(null, { status: 404 })
+  const path = await realpath(resolve(root, reviewFiles[asset as keyof typeof reviewFiles])).catch(() => null)
+  if (!path) return new Response(null, { status: 404 })
+  const inside = relative(root, path)
+  if (!inside || inside.startsWith('..') || isAbsolute(inside)) return new Response(null, { status: 404 })
   const file = await stat(path).catch(() => null)
   if (!file?.isFile()) return new Response(null, { status: 404 })
 

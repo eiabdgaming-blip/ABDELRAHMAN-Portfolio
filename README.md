@@ -16,9 +16,15 @@ $env:ABDEL_LOCAL_REVIEW = '1'
 npm.cmd run dev
 ```
 
-Open [Home](http://127.0.0.1:3000), [Work · Reels](http://127.0.0.1:3000/work?format=reels), or [Work · Long-form](http://127.0.0.1:3000/work?format=long-form). To preview the optimized build, use `npm.cmd run build` followed by `npm.cmd start` with the same environment value. Stop the local server with Ctrl+C. Set `ABDEL_LOCAL_REVIEW=1` using the equivalent syntax on other shells.
+Open [Home](http://127.0.0.1:3000), [Work · Reels](http://127.0.0.1:3000/work?format=reels), or [Work · Long-form](http://127.0.0.1:3000/work?format=long-form). To preview the production build, clear `ABDEL_LOCAL_REVIEW`, then run `npm.cmd run build` and `npm.cmd start`. Stop the local server with Ctrl+C.
 
-The review server binds to loopback. The fixture repository reads an explicit list of original files from the sibling `handoff/assets/` directory. The HTTP media endpoint supports byte ranges and serves files only with the local review flag and a loopback host. With the flag absent, the review endpoint returns 404 and the site omits the review gallery, placeholder feedback, and rights-pending media. Build traces and `public/` exclude those assets. Keep `handoff/` beside `app/` for local review and asset verification.
+The review server binds to loopback. Under `next dev` with `ABDEL_LOCAL_REVIEW=1`, it can serve the four allowlisted review reels and their posters from `../handoff/assets/`. Production always returns 404 for the review route. Review fixtures and placeholder feedback stay local. Keep `handoff/` beside `app/` for review and archive verification.
+
+### Phase 04A · Production assets
+
+The 13 decorative handoff assets in `public/visuals/` have unverified publication rights. Keep this build local and block release until the rights are verified. Their original bytes are copied for Hero, Timeline, About, and Contact. The foundation test lists the exact source mapping and verifies each local copy against its checksum. The Showreel and its poster remain in `public/videos/`. Production uses Supabase and Cloudinary for published editorial media.
+
+Run `npm.cmd run typecheck`, `npm.cmd run build`, `npm.cmd test`, `npm.cmd run test:smoke`, `npm.cmd run test:auth`, `npm.cmd run test:browser`, and `npm.cmd run test:engines` from `app/`. The review browser suite starts a development server. The smoke, auth and engine suites run the production build.
 
 | Changed files | Scope |
 |---|---|

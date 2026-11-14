@@ -6,7 +6,7 @@ import { profileFields, profileKeys, profilePattern, publicPlayerItem, type Publ
 import { FeedbackVoice } from './feedback-voice'
 import { FeedbackQuote } from './feedback-quote'
 import { ProfileIcon } from './profile-icon'
-import { reviewMedia } from '../domain/display'
+import { decorativePath } from '../domain/decorative-assets'
 import { projectTypes } from '../domain/editorial'
 import type { Question, Service, SiteContact } from '../domain/site-content'
 import { ownerEmailLink, ownerSocialLinks } from '../domain/contact'
@@ -34,7 +34,7 @@ export function Services({ services }: { services: readonly Service[] }) {
   )
 }
 
-export function About({ review }: { review: boolean }) {
+export function About() {
   return (
     <section className="about editorial-container" aria-labelledby="about-heading" data-ambient-section>
       <div className="about-copy">
@@ -42,10 +42,10 @@ export function About({ review }: { review: boolean }) {
         <h2 className="metallic-heading" id="about-heading">INSIDE THE EDIT</h2>
         <p>I'm Abdelrahman, a Video Editor &amp; Motion Designer. I help brands and creators transform their ideas into engaging visual experiences, combining creative storytelling with thoughtful motion and attention to detail.</p>
       </div>
-      {review && <div className="about-art" aria-hidden="true">
+      <div className="about-art" aria-hidden="true">
         <AmbientMedia id="disk" priority={4} className="about-disk" />
-        <img className="about-moon" src={reviewMedia('moon')} alt="" loading="lazy" />
-      </div>}
+        <img className="about-moon" src={decorativePath('glass-moon.png')} alt="" loading="lazy" />
+      </div>
     </section>
   )
 }
@@ -70,12 +70,12 @@ export function FAQ({ questions }: { questions: readonly Question[] }) {
   )
 }
 
-function Illustration({ review }: { review: boolean }) {
+function Illustration() {
   return (
     <div className="contact-illustration" aria-hidden="true">
       <div className="illustration-monitor">
         <span className="round-play glass"><PlayIcon /></span>
-        {review && <img src={reviewMedia('cursor')} alt="" loading="lazy" />}
+        <img src={decorativePath('glass-cursor.png')} alt="" loading="lazy" />
       </div>
       <div className="illustration-timeline"><i /><i /><i /><b /></div>
       <span className="mono">Editorial illustration</span>
@@ -83,8 +83,8 @@ function Illustration({ review }: { review: boolean }) {
   )
 }
 
-export function Contact({ review, selectedService, services, contact }: {
-  review: boolean; selectedService: string; services: readonly Service[]; contact: SiteContact
+export function Contact({ selectedService, services, contact }: {
+  selectedService: string; services: readonly Service[]; contact: SiteContact
 }) {
   const [enabled, setEnabled] = useState(false)
   const [error, setError] = useState('')
@@ -112,9 +112,9 @@ export function Contact({ review, selectedService, services, contact }: {
       </div>
       <div className="contact-panel">
         <div className="contact-intro">
-          {review && <div className="contact-star-zone" aria-hidden="true">
+          <div className="contact-star-zone" aria-hidden="true">
             <AmbientMedia id="contact-star" priority={3} className="contact-star" desktopOnly />
-          </div>}
+          </div>
           <div className="contact-intro-content">
             <h3>Tell me about<br /><span>your project</span></h3>
             <p>Share the project goals, footage and deliverables. I’ll reply using the contact details you provide.</p>
@@ -126,7 +126,7 @@ export function Contact({ review, selectedService, services, contact }: {
               <button className="glass" onClick={() => setFormat('reels')}>Reels &amp; Shorts</button>
               <button className="glass" onClick={() => setFormat('long-form')}>Long-form</button>
             </div>
-            <Illustration review={review} />
+            <Illustration />
           </div>
         </div>
         <form className="contact-form" method="post" aria-busy={phase === 'saving'} noValidate onChange={(event) => {

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { adminSessionCookie, createAdminSessionClient } from './lib/supabase/session'
+import { adminCookieSecure, adminSessionCookie, createAdminSessionClient } from './lib/supabase/session'
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -16,7 +16,7 @@ export async function proxy(request: NextRequest) {
         for (const [key, value] of Object.entries(headers)) refreshed.headers.set(key, value)
         response = refreshed
       },
-    }, request.nextUrl.protocol === 'https:')
+    }, adminCookieSecure(request.headers, request.nextUrl.protocol))
     // The page/action guard owns access decisions and handles provider failures.
     await supabase?.auth.getClaims().catch(() => undefined)
   }

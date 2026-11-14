@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { reviewMedia } from '../domain/display'
+import { decorativePath } from '../domain/decorative-assets'
 import { useMediaExperience } from './media-experience'
 import { PlayIcon } from './icons'
 
@@ -33,7 +33,7 @@ function rulerTime(frame: number) {
   return '00:00:' + String(Math.floor(frame / 24)).padStart(2, '0') + ':' + String(frame % 24).padStart(2, '0')
 }
 
-export function Timeline({ review }: { review: boolean }) {
+export function Timeline() {
   const [frame, setFrame] = useState(180)
   const [playing, setPlaying] = useState(false)
   const [motion, setMotion] = useState(false)
@@ -77,7 +77,7 @@ export function Timeline({ review }: { review: boolean }) {
     <section className="timeline-section container section-rule" aria-labelledby="timeline-heading">
       <span className="eyebrow">Inside the edit</span>
       <h2 className="metallic-heading" id="timeline-heading">THE TIMELINE</h2>
-      {review && <img className="timeline-cube" src={reviewMedia('cube')} alt="" loading="lazy" />}
+      <img className="timeline-cube" src={decorativePath('glass-cube.png')} alt="" loading="lazy" />
       <div className="edit-panel" ref={ref} dir="ltr">
         <div className="edit-bar mono">
           <span className="sequence-label"><i aria-hidden="true" />Sequence 01 · 24 FPS · 4K</span>

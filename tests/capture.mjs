@@ -5,7 +5,7 @@ import { startBuiltServer } from './server.mjs'
 
 const destination = new URL('../../phase-02-correction-preview/', import.meta.url)
 const output = (name) => fileURLToPath(new URL(name + '.png', destination))
-const server = await startBuiltServer({ review: true })
+const server = await startBuiltServer({ review: true, env: { NEXT_PUBLIC_SUPABASE_URL: '', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: '' } })
 let browser
 try {
   browser = await chromium.launch({ channel: 'msedge' })

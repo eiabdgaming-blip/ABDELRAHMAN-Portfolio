@@ -3,7 +3,8 @@ import { headers } from 'next/headers'
 import type { HomeContent, PortfolioRepository, PublishedProject, WorkQuery } from '../domain/portfolio'
 
 export function reviewAllowed(host: string | null) {
-  return process.env.ABDEL_LOCAL_REVIEW === '1' && /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host ?? '')
+  return process.env.NODE_ENV === 'development' && process.env.ABDEL_LOCAL_REVIEW === '1' &&
+    /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host ?? '')
 }
 
 export async function localReview() {
@@ -11,23 +12,6 @@ export async function localReview() {
 }
 
 export const reviewFiles = {
-  showreel: 'media/DIGITAL MARKETING1.mp4',
-  'showreel-poster': 'stills/DIGITAL MARKETING1-0.png',
-  'edit-frame-a': 'stills/DIGITAL MARKETING1-4.png',
-  'edit-frame-b': 'stills/DIGITAL MARKETING1-5.png',
-  'hero-left': 'media/hero_star_LEFT_as_submitted.mp4',
-  'hero-left-poster': 'stills/Glass_Star_Angle_D-2.png',
-  'hero-right': 'media/hero_star_RIGHT_as_submitted.mp4',
-  'hero-right-poster': 'stills/Glass_Star_Angle_B-2.png',
-  'hero-star': 'media/Glass_Star_Angle_A.mp4',
-  'hero-star-poster': 'stills/Glass_Star_Angle_A-2-matte.png',
-  'contact-star': 'media/contact_star_motion_REFERENCE.mp4',
-  'contact-star-poster': 'stills/Glass_Star_Angle_C-2.png',
-  disk: 'media/Dark_Disk_Motion_Reference.mp4',
-  'disk-poster': 'stills/Dark_Disk_Motion_Reference-4-matte.png',
-  cube: 'icons/Glass_Cube.png',
-  moon: 'icons/Glass_Moon.png',
-  cursor: 'icons/Glass_Cursor.png',
   lumera: 'review-reels/lumera.mp4',
   'lumera-poster': 'stills/qamar-5.jpg',
   fashion: 'review-reels/fashion.mp4',

@@ -1,11 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { reviewMedia } from '../domain/display'
+import { ambientAssets, decorativePath } from '../domain/decorative-assets'
 import { useMediaExperience } from './media-experience'
 
 export function AmbientMedia({ id, priority, className, desktopOnly = false }: {
-  id: string; priority: number; className: string; desktopOnly?: boolean
+  id: keyof typeof ambientAssets; priority: number; className: string; desktopOnly?: boolean
 }) {
   const { ambientIds, allowAmbient } = useMediaExperience()
   const allow = useRef(allowAmbient)
@@ -14,7 +14,7 @@ export function AmbientMedia({ id, priority, className, desktopOnly = false }: {
   const video = useRef<HTMLVideoElement>(null)
   const [ready, setReady] = useState(false)
   const playing = ambientIds.includes(id)
-  const poster = reviewMedia(id + '-poster')
+  const [clip, poster] = ambientAssets[id]
 
   useEffect(() => {
     const motion = matchMedia('(prefers-reduced-motion: reduce)')
@@ -59,8 +59,8 @@ export function AmbientMedia({ id, priority, className, desktopOnly = false }: {
 
   return (
     <span ref={container} className={`ambient ${className}`} aria-hidden="true" data-ambient={id}>
-      <img src={poster} alt="" draggable="false" loading={priority < 3 ? 'eager' : 'lazy'} />
-      {playing && <video ref={video} src={reviewMedia(id)} autoPlay muted playsInline loop tabIndex={-1}
+      <img src={decorativePath(poster)} alt="" draggable="false" loading={priority < 3 ? 'eager' : 'lazy'} />
+      {playing && <video ref={video} src={decorativePath(clip)} autoPlay muted playsInline loop tabIndex={-1}
         className={ready ? 'is-playing' : undefined} onPlaying={() => setReady(true)} onError={() => setReady(false)} />}
     </span>
   )

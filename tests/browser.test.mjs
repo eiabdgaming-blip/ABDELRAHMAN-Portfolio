@@ -7,7 +7,7 @@ import { startBuiltServer, root } from './server.mjs'
 
 let browser, server
 before(async () => {
-  server = await startBuiltServer({ review: true })
+  server = await startBuiltServer({ review: true, env: { NEXT_PUBLIC_SUPABASE_URL: '', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: '' } })
   browser = await chromium.launch({ channel: 'msedge' })
 })
 after(async () => {
@@ -249,33 +249,34 @@ test('all section links from Work honor the header offset with Reduced Motion', 
   }
 })
 
-test('review media matches source hashes, supports ranges and observes ambient limits', async (t) => {
+test('public decorations match the originals, review reels support ranges, and ambient limits hold', async (t) => {
   const page = await pageFor(t, { viewport: { width: 1440, height: 900 } })
   const requested = []
   page.on('request', (request) => requested.push(request.url()))
   await page.goto(url())
   await page.waitForFunction(() => document.querySelector('video.is-playing') !== null)
   assert.ok(await page.locator('[data-ambient] video').count() <= 2)
-  assert.ok(requested.includes(url('/api/review/showreel')))
+  assert.ok(requested.includes(url('/videos/showreel.mp4')))
   await page.locator('.hero-left video.is-playing').waitFor()
   await page.evaluate(() => scrollTo(0, 160))
   await page.locator('.hero-right video.is-playing').waitFor()
   assert.equal(await page.locator('.hero-left video').count(), 0)
   assert.ok(await page.locator('[data-ambient] video').count() <= 2)
   for (const [key, file] of [['hero-left', 'hero_star_LEFT_as_submitted.mp4'], ['hero-right', 'hero_star_RIGHT_as_submitted.mp4']]) {
-    const response = await page.request.get(url('/api/review/' + key))
+    const response = await page.request.get(url('/visuals/' + key + '.mp4'))
     assert.equal(response.status(), 200)
     const expected = await readFile(new URL('../handoff/assets/media/' + file, root))
     const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
     assert.equal(sha(await response.body()), sha(expected))
   }
-  const range = await page.request.get(url('/api/review/showreel'), { headers: { Range: 'bytes=100-199' } })
+  const range = await page.request.get(url('/api/review/fashion'), { headers: { Range: 'bytes=100-199' } })
   assert.equal(range.status(), 206)
   assert.match(range.headers()['content-range'], /^bytes 100-199\//)
   assert.equal((await range.body()).length, 100)
-  assert.equal((await page.request.get(url('/api/review/showreel'), { headers: { Range: 'bytes=99999999-' } })).status(), 416)
-  assert.equal((await page.request.get(url('/api/review/showreel'), { headers: { 'sec-fetch-site': 'cross-site' } })).status(), 404)
+  assert.equal((await page.request.get(url('/api/review/fashion'), { headers: { Range: 'bytes=99999999-' } })).status(), 416)
+  assert.equal((await page.request.get(url('/api/review/fashion'), { headers: { 'sec-fetch-site': 'cross-site' } })).status(), 404)
   assert.equal((await page.request.get(url('/api/review/unknown'))).status(), 404)
+  assert.equal((await page.request.get(url('/api/review/fashion'), { headers: { host: 'portfolio.example.test' } })).status(), 404)
   await page.evaluate(() => scrollTo(0, 0))
   const leftVideo = page.locator('.hero-left video.is-playing')
   await leftVideo.waitFor()
@@ -305,6 +306,35 @@ test('review media matches source hashes, supports ranges and observes ambient l
   await constrained.goto(url())
   await constrained.locator('.contact-panel').scrollIntoViewIfNeeded()
   assert.equal(await constrained.locator('[data-ambient] video').count(), 0)
+})
+
+test('production Home and Work render without broken images or review requests', async (t) => {
+  const production = await startBuiltServer({ env: { NEXT_PUBLIC_SUPABASE_URL: '', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: '' } })
+  t.after(production.stop)
+  for (const [width, height] of [[1440, 900], [390, 844]]) {
+    const page = await pageFor(t, { viewport: { width, height }, reducedMotion: 'reduce' })
+    const reviewRequests = []
+    page.on('request', (request) => { if (new URL(request.url()).pathname.startsWith('/api/review/')) reviewRequests.push(request.url()) })
+    await page.goto(production.origin)
+    for (const section of ['#hero', '#reels', '#feedback', '#contact']) await page.locator(section).waitFor()
+    const visuals = page.locator('img[src^="/visuals/"]')
+    assert.equal(await visuals.count(), 8)
+    for (const image of await visuals.all()) {
+      assert.ok(await image.evaluate(async (node) => {
+        node.loading = 'eager'
+        await node.decode()
+        return node.naturalWidth > 0
+      }))
+    }
+    await page.waitForFunction(() => document.querySelector('.hero-poster video')?.currentTime > 0.15)
+    assert.equal(await page.locator('[data-ambient] video').count(), 0)
+    await noOverflow(page)
+    await page.goto(production.origin + '/work')
+    await page.getByRole('heading', { name: 'WORK', exact: true }).waitFor()
+    await noOverflow(page)
+    assert.deepEqual(reviewRequests, [])
+    await page.close()
+  }
 })
 
 test('Hero autoplays muted, loops and resumes while reels stay click-to-play', async (t) => {
