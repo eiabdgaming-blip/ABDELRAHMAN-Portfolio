@@ -9,7 +9,7 @@ export async function prepareFeedbackImage(cloud: Cloud, image: FeedbackImage, s
   const id = 'abdel-feedback-' + createHmac('sha256', cloud.secret).update(slot + ':' + image.id).digest('hex').slice(0, 32)
   const api = `https://api.cloudinary.com/v1_1/${cloud.cloud}`
   const headers = { Authorization: 'Basic ' + Buffer.from(cloud.key + ':' + cloud.secret).toString('base64') }
-  const config = { headers, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(18_000) } as const
+  const config = { headers, cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(18_000) } as const
   let response = await fetch(`${api}/resources/image/upload/${id}`, config)
   if (response.status === 404) {
     await response.body?.cancel()
@@ -33,7 +33,7 @@ export async function prepareFeedbackImage(cloud: Cloud, image: FeedbackImage, s
     throw new Error('Cloudinary returned an unexpected feedback image.')
   }
   const url = `https://res.cloudinary.com/${cloud.cloud}/image/upload/v${output.version}/${id}.webp`
-  const ready = await fetch(url, { method: 'HEAD', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10_000) })
+  const ready = await fetch(url, { method: 'HEAD', cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(10_000) })
   if (!ready.ok || ready.headers.get('content-type')?.split(';')[0] !== 'image/webp') {
     throw new Error('The optimized image is still unavailable.')
   }

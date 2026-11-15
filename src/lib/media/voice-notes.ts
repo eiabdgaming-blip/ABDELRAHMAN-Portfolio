@@ -50,7 +50,7 @@ const invalid = () => new VoiceValidationError('Choose a valid MP3, WAV or OGG a
 async function checkHeader(cloud: Cloud, voice: VoiceAsset, format: VoiceFormat, compatible = false) {
   const response = await fetch(signedVoiceUrl(cloud, voice, compatible), {
     headers: { Range: 'bytes=0-511', 'Accept-Encoding': 'identity' },
-    cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(12_000),
+    cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(12_000),
   })
   const range = /^bytes 0-(\d+)\/(\d+)$/.exec(response.headers.get('content-range') ?? '')
   const mime = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase()
@@ -80,7 +80,7 @@ export async function verifyVoice(cloud: Cloud, ticket: Ticket) {
   const id = assetName(ticket.id)
   const response = await fetch(`${endpoint(cloud)}/resources/video/authenticated/${id}?media_metadata=true`, {
     headers: { Authorization: 'Basic ' + Buffer.from(cloud.key + ':' + cloud.secret).toString('base64') },
-    cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(12_000),
+    cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(12_000),
   })
   if (!response.ok) {
     await response.body?.cancel()
@@ -124,7 +124,7 @@ export async function streamVoice(request: Request, cloud: Cloud, voice: VoiceAs
     return new Response(null, { status: 416, headers: { 'Cache-Control': 'private, no-store' } })
   }
   try {
-    const upstream = await fetch(source, { cache: 'no-store', redirect: 'error', signal: request.signal,
+    const upstream = await fetch(source, { cache: 'no-store', redirect: 'manual', signal: request.signal,
       headers: { 'Accept-Encoding': 'identity', ...(range ? { Range: range } : {}) } })
     const headers = new Headers({ 'Cache-Control': 'private, no-store, no-transform', 'X-Content-Type-Options': 'nosniff',
       'Content-Type': voice.format === 'wav' ? 'audio/wav' : 'audio/mpeg' })

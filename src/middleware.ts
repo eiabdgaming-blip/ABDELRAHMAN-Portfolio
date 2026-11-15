@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { adminCookieSecure, adminSessionCookie, createAdminSessionClient } from './lib/supabase/session'
 
-export async function proxy(request: NextRequest) {
+// Use Next's Edge middleware so OpenNext can refresh sessions before rendering.
+export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
   // Server Actions write their own cookies, including sign-in and sign-out changes.
   if (request.method === 'GET' && request.cookies.getAll().some(({ name }) =>

@@ -1,5 +1,22 @@
 # ABDELRAHMAN Portfolio
 
+## Cloudflare Workers preview
+
+This branch uses the [Cloudflare OpenNext adapter](https://developers.cloudflare.com/workers/framework-guides/web-apps/opennext/) with the existing Next.js app. The Worker is `abdelrahman-portfolio-workers-preview`, with search indexing disabled and no custom domains. The Worker entry point adds byte-range support for the existing static MP4s, and Admin uses Next.js middleware to refresh Supabase sessions.
+
+For local preview, put `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in the ignored `.env.local` for the Next.js build. Put the six runtime keys listed in `wrangler.jsonc` in the ignored `.dev.vars`. Use the Supabase **publishable** key for public reads and the separate Supabase **secret** key for `SUPABASE_MEDIA_SECRET_KEY`. Keep the Supabase writer key and Cloudinary credentials in the runtime file.
+
+```sh
+npm ci
+npm run build:worker
+npm run check:worker
+npm run preview:worker -- --port 8787
+```
+
+Open [Home](http://127.0.0.1:8787/) and [Admin sign-in](http://127.0.0.1:8787/admin/login). The preview uses the configured Supabase and Cloudinary projects. Contact submissions and Admin changes affect those projects.
+
+After local verification and explicit deployment approval, sign in to the intended Cloudflare account with `npm exec -- wrangler login`. In **Cloudflare Dashboard → Workers & Pages**, confirm the account's `workers.dev` subdomain and the intended preview Worker name. Then run `npm exec -- opennextjs-cloudflare deploy -- --secrets-file .dev.vars` against the verified build. Wrangler uploads the runtime values as encrypted Worker secrets. If using Workers Builds later, set the two public keys under **Settings → Build → Build variables and secrets** and configure the runtime values under **Settings → Variables and Secrets**. A hosted preview requires confirmation that the included media can be published.
+
 ## Phase 02 correction pass
 
 Use the local review setup below. The left Hero star loops whenever it is visible and motion is enabled. The showreel and the Home and Work reels now play in their original frames. The compact Timeline supports scrubbing and horizontal scrolling on narrow screens. The marquee scrolls continuously while visible, shows its motion control on keyboard focus, and displays static terms with Reduced Motion enabled.

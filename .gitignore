@@ -17,6 +17,9 @@ next-env.d.ts
 # Build and deployment
 coverage/
 .vercel/
+.open-next/
+.wrangler/
+.dev.vars*
 
 # Secrets
 *.pem

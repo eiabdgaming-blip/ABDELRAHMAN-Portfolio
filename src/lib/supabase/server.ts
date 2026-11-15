@@ -8,7 +8,7 @@ export async function createSupabaseServerClient({ writable = false } = {}) {
   const supabase = createAdminSessionClient({
     getAll: () => store.getAll(),
     setAll: (updates) => {
-      // For Server Components, the admin Proxy refreshes cookies before rendering.
+      // For Server Components, the admin middleware refreshes cookies before rendering.
       if (writable) for (const { name, value, options } of updates) store.set(name, value, options)
     },
   }, secure)

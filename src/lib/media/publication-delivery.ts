@@ -40,7 +40,7 @@ export async function queuePublicCopy(cloud: Cloud, source: PublicationSource) {
   })) fields.set(name, value)
   const response = await fetch(endpoint(cloud, `${source.resource_type}/upload`), {
     method: 'POST', body: fields, headers: { Authorization: basicAuth(cloud) },
-    cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(18_000),
+    cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(18_000),
   })
   await response.body?.cancel()
   if (!response.ok) throw new Error('Cloudinary could not queue the delivery copy.')
@@ -50,7 +50,7 @@ async function accessible(url: string, mime: string, range = false) {
   const response = await fetch(url, {
     method: range ? 'GET' : 'HEAD',
     headers: range ? { Range: 'bytes=0-1' } : {},
-    cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(12_000),
+    cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(12_000),
   })
   await response.body?.cancel()
   return (range
@@ -63,7 +63,7 @@ export async function verifiedPublicCopy(cloud: Cloud, source: PublicationSource
   const kind = source.resource_type
   const response = await fetch(endpoint(cloud, `resources/${kind}/upload/${id}`), {
     headers: { Authorization: basicAuth(cloud) },
-    cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(12_000),
+    cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(12_000),
   })
   if (response.status === 404) { await response.body?.cancel(); return null }
   if (!response.ok) { await response.body?.cancel(); throw new Error('Cloudinary could not verify the delivery copy.') }
