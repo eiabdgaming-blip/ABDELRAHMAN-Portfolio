@@ -12,6 +12,35 @@ export type PublicationResult = { message: string; error?: boolean; preparing?: 
 const uuid = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i
 const fail = (message: string) => ({ message, error: true })
 
+export async function deleteMediaAsset(id: string, revision: number, form: FormData): Promise<PublicationResult> {
+  const { user } = await requireAdmin({ writable: true })
+  if (typeof id !== 'string' || !uuid.test(id) || !Number.isSafeInteger(revision) || revision < 0) return fail('Invalid media selection.')
+  if (form.get('confirmed') !== 'yes') return fail('Confirm the deletion before applying it.')
+  const writer = mediaWriter()
+  if (!writer) return fail('Configure the server credentials to delete media records.')
+
+  const { data, error } = await writer.rpc('delete_media_asset', { p_actor: user.id, p_id: id, p_revision: revision })
+  if (error?.code === 'PGRST202' || error?.code === '42883') return fail('Media deletion requires the database migration.')
+  if (error?.code === '42501') return fail('An active owner account is required to delete media.')
+  if (error) return fail('The media record could not be deleted. Refresh the library and try again.')
+
+  switch (data?.status) {
+    case 'stale': return fail('This asset changed. Refresh the library and try again.')
+    case 'published': return fail('Hide this asset from the website before deleting it.')
+    case 'poster': return fail(`This asset is the poster for published video “${data.title}”. Change its poster or hide the video first.`)
+    case 'project': return fail(`Published project “${data.title}” uses this asset. Remove it from the project or hide the project first.`)
+    case 'feedback': return fail(`Published feedback from “${data.title}” uses this asset. Remove the reference or hide the feedback first.`)
+    case 'missing':
+    case 'deleted':
+      revalidatePath('/admin/media')
+      revalidatePath('/admin/projects')
+      revalidatePath('/admin/feedback')
+      revalidatePath('/admin')
+      return { message: data.status === 'deleted' ? `“${data.title}” was removed from Media Library.` : 'This asset has already been removed.' }
+    default: return fail('The media record could not be deleted. Refresh the library and try again.')
+  }
+}
+
 export async function changePublication(id: string, revision: number, form: FormData): Promise<PublicationResult> {
   const { user, supabase } = await requireAdmin({ writable: true })
   const writer = mediaWriter()
@@ -27,7 +56,7 @@ export async function changePublication(id: string, revision: number, form: Form
   if (error || !source) return fail('The media record could not be loaded.')
   const stale = () => fail('This item changed. Refresh the page and try again.')
   const rejection = (result: unknown) => {
-    if (result === 'featured_limit') return fail('Home already has six featured Reels. Remove one before featuring another.')
+    if (result === 'featured_limit') return fail('Apply the Home Reels database migration to publish more featured reels.')
     if (result === 'invalid_poster') return fail('Choose a published image or use the automatic poster.')
     return stale()
   }
@@ -64,7 +93,7 @@ export async function changePublication(id: string, revision: number, form: Form
     typeof description !== 'string' || description.length > 1000 || typeof poster !== 'string' || (poster && !uuid.test(poster)) ||
     typeof order !== 'string' || !/^\d{1,5}$/.test(order)) return fail('Check the display settings and try again.')
   if ((command === 'publish' || source.status === 'published') && placement === 'home' && !featured) {
-    return fail('Feature this Reel to publish it on Home, or change its placement to Work.')
+    return fail('Mark this Home-only reel as featured or choose another placement.')
   }
 
   let safeTitle: string

@@ -20,6 +20,9 @@ export function ReelRail({ items, home = false, initial = 0 }: {
   const count = items.length
   const wrap = (n: number) => wrapReelIndex(n, count)
   const slots = visibleReelIndexes(active, count)
+  // Keep Home's dot row within the space between the mobile arrows.
+  const dotCount = home ? Math.min(count, 7) : count
+  const firstDot = Math.min(Math.max(0, active - Math.floor(dotCount / 2)), count - dotCount)
 
   useEffect(() => {
     const query = matchMedia('(max-width: 767px)')
@@ -46,8 +49,11 @@ export function ReelRail({ items, home = false, initial = 0 }: {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
     event.preventDefault()
     const moveFocus = compact && stage.current?.contains(document.activeElement)
+    const rail = event.currentTarget
+    const dotFocused = home && document.activeElement?.matches('.rail-dot')
     move(event.key === 'ArrowRight' ? 1 : -1)
     if (moveFocus) requestAnimationFrame(() => stage.current?.querySelector<HTMLElement>('[data-slot="active"] .inline-toggle')?.focus())
+    if (dotFocused) requestAnimationFrame(() => rail.querySelector<HTMLElement>('.rail-dot[aria-current]')?.focus())
   }
 
   return (
@@ -88,11 +94,12 @@ export function ReelRail({ items, home = false, initial = 0 }: {
         </button>
         <div className="rail-position">
           <span className="sr-only" role="status">{`Reel ${active + 1} of ${count}`}</span>
-          {items.map(({ id }, index) => (
-            <button key={id} className="rail-dot" aria-label={`Go to reel ${index + 1}`}
+          {items.slice(firstDot, firstDot + dotCount).map(({ id }, offset) => {
+            const index = firstDot + offset
+            return <button key={id} className="rail-dot" aria-label={`Go to reel ${index + 1}`}
               inert={compact} aria-hidden={compact || undefined}
               aria-current={index === active ? 'true' : undefined} onClick={() => select(index)}><span /></button>
-          ))}
+          })}
           <span className="rail-count mono" aria-hidden="true">{number(active + 1)} / {number(count)}</span>
         </div>
       </div>

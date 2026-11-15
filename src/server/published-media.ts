@@ -32,10 +32,22 @@ function project(row: Listing): PublishedProject {
 }
 
 export async function publishedHomeReels(): Promise<PublishedProject[]> {
-  const { data } = await publicClient()?.from('published_portfolio_media').select(columns)
-    .eq('project_format', 'reel').eq('featured', true).in('placement', ['home', 'both'])
-    .order('display_order').order('published_at', { ascending: false }).order('id').limit(6) ?? {}
-  return (data ?? []).map(project)
+  const supabase = publicClient()
+  if (!supabase) return []
+  const reels: PublishedProject[] = []
+  const pageSize = 250
+  let total: number | null = null
+  while (total === null || reels.length < total) {
+    const offset = reels.length
+    const { data, error, count } = await supabase.from('published_portfolio_media')
+      .select(columns, offset === 0 ? { count: 'exact' } : undefined).eq('project_format', 'reel')
+      .in('placement', ['home', 'both'])
+      .order('display_order').order('published_at', { ascending: false }).order('id').range(offset, offset + pageSize - 1)
+    if (error || !data?.length) break
+    if (offset === 0) total = count
+    for (const row of data) reels.push(project(row))
+  }
+  return reels
 }
 
 export async function publishedWork({ format, tagSlugs, sort, cursor, limit = 12 }: WorkQuery): Promise<WorkPage> {

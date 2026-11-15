@@ -21,6 +21,7 @@
 .publication fieldset { min-width: 0; margin: 12px 0; padding: 0; border: 0; display: grid; gap: 10px; }
 .publication label { display: grid; gap: 4px; }
 .publication label.check { display: flex; align-items: center; gap: 6px; }
+.publication .delete { color: var(--color-error); }
 .publication :is(input:not([type="checkbox"]), select, textarea) {
   width: 100%; min-width: 0; padding: 6px; color: inherit; background: var(--color-background);
   border: 1px solid var(--color-divider); border-radius: 6px;

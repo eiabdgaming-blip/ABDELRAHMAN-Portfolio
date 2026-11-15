@@ -2,16 +2,18 @@
 
 import { useState, useTransition, type FormEvent } from 'react'
 import { workCategories } from '../../../domain/work-categories'
-import { changePublication, type PublicationResult } from './publication-actions'
+import { changePublication, deleteMediaAsset, type PublicationResult } from './publication-actions'
 import styles from './media.module.css'
 
-type Publication = {
+export type Publication = {
   id: string; title: string; resource_type: string; status: string; publication_revision: number;
   placement: string; project_format: string; featured: boolean; display_order: number;
   category: string | null; description: string | null; poster_asset_id: string | null;
 }
 
-export function PublicationForm({ asset, posters }: { asset: Publication; posters: { id: string; title: string }[] }) {
+export function PublicationForm({ asset, posters, canPublish, onDeleted }: {
+  asset: Publication; posters: { id: string; title: string }[]; canPublish: boolean; onDeleted: (message: string) => void;
+}) {
   const [result, setResult] = useState<PublicationResult>()
   const [pending, startTransition] = useTransition()
   const video = asset.resource_type === 'video'
@@ -26,7 +28,9 @@ export function PublicationForm({ asset, posters }: { asset: Publication; poster
     const button = (event.nativeEvent as SubmitEvent).submitter
     const form = new FormData(event.currentTarget, button)
     const command = form.get('command')
-    const confirmation = command === 'hide' ? 'Hide this media from public listings? Previously shared CDN links may still work.'
+    const confirmation = command === 'delete'
+      ? `Delete “${asset.title}” from Media Library? This removes its metadata and clears references in unpublished entries. Cloudinary files stay in place.`
+      : command === 'hide' ? 'Hide this media from public listings? Previously shared CDN links may still work.'
       : command === 'publish' ? 'Prepare and publish this media? Its optimized Cloudinary copy will become publicly accessible.'
         : 'Save these display settings? Changes to published media will appear on the website.'
     if (!window.confirm(confirmation)) return
@@ -34,7 +38,13 @@ export function PublicationForm({ asset, posters }: { asset: Publication; poster
     setResult(undefined)
     startTransition(async () => {
       try {
-        setResult(await changePublication(asset.id, asset.publication_revision, form))
+        if (command === 'delete') {
+          const deletion = await deleteMediaAsset(asset.id, asset.publication_revision, form)
+          if (deletion.error) setResult(deletion)
+          else onDeleted(deletion.message)
+        } else {
+          setResult(await changePublication(asset.id, asset.publication_revision, form))
+        }
       } catch {
         setResult({ message: 'The request could not be completed. Refresh and check the current status.', error: true })
       }
@@ -57,7 +67,8 @@ export function PublicationForm({ asset, posters }: { asset: Publication; poster
             <label>Format<select name="project_format" value={format} onChange={(event) => setFormat(event.target.value)}>
               <option value="reel">Reel</option><option value="long-form" disabled={home}>Long-form</option>
             </select></label>
-            {home && <label className={styles.check}><input type="checkbox" name="featured" value="yes" defaultChecked={asset.featured || placement === 'home'} /> Feature on Home (max 6)</label>}
+            {format === 'reel' && <p>Published reels appear in the sections selected under Placement.</p>}
+            {home && <label className={styles.check}><input type="checkbox" name="featured" value="yes" defaultChecked={asset.featured || placement === 'home'} /> Mark as featured</label>}
             <label>Display order (lower first)<input type="number" name="display_order" min={0} max={99999} defaultValue={asset.display_order} required /></label>
             <label>Work category<select name="category" defaultValue={asset.category ?? ''}>
               <option value="">None</option>{workCategories.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
@@ -73,7 +84,8 @@ export function PublicationForm({ asset, posters }: { asset: Publication; poster
           <div className={styles.actions}>
             <button className="glass" name="command" value="save">Save settings</button>
             {published ? <button className="glass" name="command" value="hide" formNoValidate>Hide</button>
-              : <button className="glass" name="command" value="publish">{preparing ? 'Check and publish' : 'Publish'}</button>}
+              : <button className="glass" name="command" value="publish" disabled={!canPublish}>{preparing ? 'Check and publish' : 'Publish'}</button>}
+            <button className={`glass ${styles.delete}`} name="command" value="delete" formNoValidate>Delete Asset</button>
           </div>
         </fieldset>
         {pending && <p role="status">Applying change…</p>}

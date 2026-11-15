@@ -24,8 +24,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     publicSiteContent(review),
     homePortfolioContent(),
   ])
-  const featuredReels = published.length ? published : fixtures
-  const featured = featuredReels.slice(0, 6).map(projectPlayerItem)
+  const reels = (published.length ? published : fixtures).map(projectPlayerItem)
   const selectedService = services.find(([key]) => key === query.service)?.[0] ?? ''
   return (
     <>
@@ -43,12 +42,12 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       : undefined
   }
 />
-        <section id="reels" className="home-reels container" tabIndex={-1} aria-labelledby="reels-heading" data-empty={!featured.length}>
+        <section id="reels" className="home-reels container" tabIndex={-1} aria-labelledby="reels-heading" data-empty={!reels.length}>
           <div className="section-intro">
             <span className="eyebrow">Selected work</span>
             <h2 className="metallic-heading" id="reels-heading">REELS</h2>
           </div>
-          {featured.length ? <ReelRail key={featured.map(({ id }) => id).join(',')} items={featured} initial={1} home /> : <p className="empty-state">No reels are available yet.</p>}
+          {reels.length ? <ReelRail key={reels.map(({ id }) => id).join(',')} items={reels} initial={published.length ? 0 : 1} home /> : <p className="empty-state">No reels are available yet.</p>}
         </section>
         <SelectedProjects projects={portfolio.projects} />
         <Timeline />

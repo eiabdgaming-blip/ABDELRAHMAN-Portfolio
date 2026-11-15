@@ -15,8 +15,9 @@
   "preview_urls": false,
   "keep_vars": true,
   "vars": {
-    "PORTFOLIO_INDEXING_ENABLED": "0"
-  },
+  "PORTFOLIO_INDEXING_ENABLED": "0",
+  "NEXT_PUBLIC_SITE_URL": "https://abdelrahman-portfolio-workers-preview.eiabdgaming.workers.dev"
+},
   "secrets": {
     "required": [
       "NEXT_PUBLIC_SUPABASE_URL",

@@ -32,9 +32,11 @@ test('admin auth, media and site content against local provider stubs', async (t
   const drafts = new Map()
   let verificationMismatch = true
   let databaseUnavailable = true
+  let deletionRequests = 0
   const copies = new Map()
   const cdn = 'https://res.cloudinary.com/fixture-media'
   let cdnReady = false
+  let publicMediaRowCap = Infinity
   const projects = new Map()
   const feedback = new Map()
   const leads = new Map()
@@ -160,6 +162,17 @@ test('admin auth, media and site content against local provider stubs', async (t
         ...draft, created_at: new Date().toISOString(),
       })
       return send(201, {})
+    }
+    if (url.pathname === '/rest/v1/rpc/delete_media_asset') {
+      deletionRequests++
+      const { p_actor, p_id, p_revision } = JSON.parse(await body())
+      if (req.headers.apikey !== writerKey || p_actor !== owner.id || membership !== 'active') return send(403, {})
+      const asset = drafts.get(p_id)
+      if (!asset) return send(200, { status: 'missing' })
+      if (asset.publication_revision !== p_revision) return send(200, { status: 'stale' })
+      if (asset.status === 'published') return send(200, { status: 'published' })
+      drafts.delete(p_id)
+      return send(200, { status: 'deleted', title: asset.title })
     }
     if (url.pathname === '/rest/v1/rpc/change_media_publication') {
       const args = JSON.parse(await body())
@@ -315,9 +328,16 @@ test('admin auth, media and site content against local provider stubs', async (t
       const category = url.searchParams.get('category')
       const rows = [...drafts.values()].filter((asset) => asset.status === 'published' && asset.resource_type === 'video' &&
         asset.project_format === format && (!featured || asset.featured) &&
-        placement.includes(asset.placement) && (!category || category.includes(asset.category)))
-      rows.sort((a, b) => a.display_order - b.display_order)
-      return send(200, rows.map((asset) => ({
+        (!placement || placement.includes(asset.placement)) && (!category || category.includes(asset.category)))
+      rows.sort((a, b) => a.display_order - b.display_order ||
+        (b.published_at ?? '').localeCompare(a.published_at ?? '') || a.id.localeCompare(b.id))
+      const offset = Number(url.searchParams.get('offset') ?? 0)
+      const limit = Math.min(Number(url.searchParams.get('limit') ?? Infinity), publicMediaRowCap)
+      const page = rows.slice(offset, offset + limit)
+      if (req.headers.prefer?.includes('count=exact')) {
+        res.setHeader('Content-Range', page.length ? `${offset}-${offset + page.length - 1}/${rows.length}` : `*/${rows.length}`)
+      }
+      return send(200, page.map((asset) => ({
         id: asset.id, title: asset.title, description: asset.description, project_format: asset.project_format,
         category: asset.category, playback_url: asset.public_delivery.url, poster_url: asset.public_delivery.poster,
         poster_small_url: asset.public_delivery.poster_small, width: asset.public_delivery.width,
@@ -570,10 +590,12 @@ test('admin auth, media and site content against local provider stubs', async (t
   })
 
   await t.test('publishes verified copies to selected sections and hides them without changing the Admin player', async () => {
-    const publicPage = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    const publicPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, hasTouch: true })
     const videoBytes = await readFile(new URL('../public/videos/showreel.mp4', import.meta.url))
+    let reelDownloads = 0
     await publicPage.route(cdn + '/**', async (route) => {
       if (!route.request().url().endsWith('.mp4')) return route.fulfill({ status: 200, body: '' })
+      reelDownloads++
       const [, first, last] = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range ?? '') ?? []
       const start = Number(first ?? 0)
       const end = last ? Math.min(+last, videoBytes.length - 1) : videoBytes.length - 1
@@ -598,7 +620,7 @@ test('admin auth, media and site content against local provider stubs', async (t
     await card.getByText('Publication settings', { exact: true }).click()
     await card.getByLabel('Title').fill('Published test Reel')
     await card.getByLabel('Placement').selectOption('both')
-    await card.getByLabel('Feature on Home').check()
+    await card.getByLabel('Mark as featured').check()
     await card.getByLabel('Display order').fill('10')
     await card.getByLabel('Work category').selectOption('product')
     page.once('dialog', (dialog) => dialog.dismiss())
@@ -645,20 +667,52 @@ test('admin auth, media and site content against local provider stubs', async (t
     await publicPage.getByRole('region', { name: 'Work reels' }).getByRole('button', { name: 'Play Published test Reel' }).waitFor()
     await publicPage.goto(work + '?category=travel')
     assert.equal(await publicPage.getByRole('region', { name: 'Work reels' }).count(), 0)
-    const extra = ['home-only', 'both'].map((id, index) => ({
-      ...[...drafts.values()].find(({ resource_type }) => resource_type === 'video'),
-      id, title: id, placement: index ? 'both' : 'home', display_order: 8 + index,
+    const orderedTitles = ['home-only', 'newer tie', 'older tie', 'fourth', 'fifth', 'sixth', 'seventh']
+    const source = [...drafts.values()].find(({ resource_type }) => resource_type === 'video')
+    const extra = orderedTitles.map((title, index) => ({
+      ...source, id: `additional-reel-${index}`, title, placement: index === 0 ? 'home' : 'both',
+      featured: index === 0, display_order: [1, 3, 3, 4, 5, 6, 7][index],
+      published_at: index === 1 ? '2026-11-14T00:00:00Z' : '2026-11-13T00:00:00Z',
     }))
-    for (const asset of extra) drafts.set(asset.id, asset)
+    extra.push({ ...source, id: 'work-only', title: 'Work-only test reel', placement: 'work', featured: false, display_order: 2 })
+    for (const asset of [...extra].reverse()) drafts.set(asset.id, asset)
     await publicPage.setViewportSize({ width: 1440, height: 900 })
-    await publicPage.goto(home)
+    const previousDownloads = reelDownloads
+    publicMediaRowCap = 3
+    const homeResponse = await publicPage.goto(home)
+    publicMediaRowCap = Infinity
+    assert.doesNotMatch(await homeResponse.text(), /Work-only test reel/)
+    assert.equal(await homeReels.getAttribute('data-count'), '8')
     assert.equal(await homeReels.locator('.reel-cover').count(), 3)
-    await homeReels.getByRole('button', { name: 'Go to reel 1' }).click()
-    assert.match(await homeReels.locator('[data-slot="active"] .inline-toggle').getAttribute('aria-label'), /home-only/)
-    await publicPage.setViewportSize({ width: 390, height: 844 })
+    const active = homeReels.locator('[data-slot="active"] button.inline-toggle')
+    const next = homeReels.getByRole('button', { name: 'Next reel' })
+    for (const title of [...orderedTitles, 'Published test Reel']) {
+      assert.equal(await active.getAttribute('aria-label'), `Play ${title}`)
+      await next.click()
+    }
+    assert.equal(await active.getAttribute('aria-label'), 'Play home-only')
+    await homeReels.getByRole('button', { name: 'Go to reel 7' }).press('ArrowLeft')
+    await publicPage.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Go to reel 8')
+    await publicPage.setViewportSize({ width: 320, height: 844 })
     await publicPage.waitForFunction(() => document.querySelectorAll('.home-rail .reel-cover[inert]').length === 2)
+    await active.scrollIntoViewIfNeeded()
+    const { x, y, width, height } = await active.boundingBox()
+    const client = await publicPage.context().newCDPSession(publicPage)
+    const touch = { x: x + width * .7, y: y + height * .5 }
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [touch] })
+    await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...touch, x: touch.x - 78 }] })
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await homeReels.getByRole('button', { name: 'Play home-only' }).waitFor()
+    assert.ok(await publicPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    assert.equal(await homeReels.locator('video[preload="none"]:not([src])').count(), 3)
+    assert.equal(await homeReels.locator('img[loading="lazy"]').count(), 3)
+    assert.equal(reelDownloads, previousDownloads)
+    await publicPage.setViewportSize({ width: 1440, height: 900 })
     await publicPage.goto(work)
-    assert.equal(await publicPage.getByRole('button', { name: 'Play home-only', exact: true }).count(), 0)
+    const workReels = publicPage.getByRole('region', { name: 'Work reels' })
+    await workReels.getByRole('button', { name: 'Play Work-only test reel', exact: true }).waitFor()
+    await workReels.getByRole('button', { name: 'Play newer tie', exact: true }).waitFor()
+    assert.equal(await workReels.getByRole('button', { name: 'Play home-only', exact: true }).count(), 0)
     for (const asset of extra) drafts.delete(asset.id)
     const form = published.getByRole('form')
     await form.getByLabel('Placement').selectOption('work')
@@ -1154,6 +1208,60 @@ test('admin auth, media and site content against local provider stubs', async (t
       await submit(owner)
       await dashboard.waitFor()
     } finally { await home.close() }
+  })
+
+  await t.test('deletes missing media metadata after confirmation and rejects published or unauthorized deletion', async () => {
+    const source = [...drafts.values()].find((asset) => asset.resource_type === 'video')
+    const id = randomUUID()
+    const title = 'Missing Cloudinary video'
+    const asset = { ...source, id, title, cloudinary_public_id: 'abdel-media-' + id, status: 'published', publication_revision: 0 }
+    drafts.set(id, asset)
+    assert.equal(uploads.has(asset.cloudinary_public_id), false)
+    const card = page.locator('li').filter({ has: page.getByRole('heading', { name: title, exact: true }) })
+    const remove = card.getByRole('button', { name: 'Delete Asset' })
+    const open = async () => { await page.goto(media); await card.getByText('Publication settings').click() }
+    const originalUploads = uploads.size
+    const originalCopies = copies.size
+    await open()
+    const confirmation = page.waitForEvent('dialog')
+    const cancelling = remove.click()
+    const dialog = await confirmation
+    assert.match(dialog.message(), /Missing Cloudinary video/)
+    await dialog.dismiss()
+    await cancelling
+    assert.equal(deletionRequests, 0)
+
+    page.once('dialog', (prompt) => prompt.accept())
+    await remove.click()
+    await card.getByRole('alert').getByText('Hide this asset from the website before deleting it.').waitFor()
+    assert.ok(drafts.has(id))
+
+    page.once('dialog', (prompt) => prompt.accept())
+    await card.getByRole('button', { name: 'Hide', exact: true }).click()
+    await card.getByText('Hidden from the website.').waitFor()
+    const beforeRevocation = deletionRequests
+    membership = 'disabled'
+    page.once('dialog', (prompt) => prompt.accept())
+    await remove.click()
+    await assertDenied('?error=denied')
+    assert.equal(deletionRequests, beforeRevocation)
+    assert.ok(drafts.has(id))
+
+    membership = 'active'
+    await submit(owner)
+    await dashboard.waitFor()
+    await open()
+    page.once('dialog', (prompt) => prompt.accept())
+    await remove.click()
+    await page.getByRole('status').filter({ hasText: '“Missing Cloudinary video” was removed from Media Library.' }).waitFor()
+    await card.waitFor({ state: 'detached' })
+    assert.equal(drafts.has(id), false)
+    assert.ok(drafts.has(source.id))
+    assert.equal(uploads.size, originalUploads)
+    assert.equal(copies.size, originalCopies)
+    assert.equal((await page.request.get(media + '/preview/' + id)).status(), 404)
+    await page.goto(admin)
+    await dashboard.waitFor()
   })
 
   // Seed a session issued by the local fixture whose access token needs refreshing.
